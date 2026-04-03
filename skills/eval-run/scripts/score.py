@@ -31,6 +31,14 @@ from agent_eval.config import EvalConfig
 RUNS_DIR = Path("eval/runs")
 
 
+def _resolve_under(root: Path, candidate: Path) -> Path:
+    """Ensure a path resolves under root. Raises ValueError if it escapes."""
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError(f"Path escapes root directory: {candidate}")
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # Case record loading — reads all files, no schema interpretation
 # ---------------------------------------------------------------------------
@@ -44,7 +52,7 @@ def load_case_record(case_dir, config):
             "case_dir": str,
         }
     """
-    case_dir = Path(case_dir)
+    case_dir = Path(case_dir).resolve()
     record = {"files": {}, "case_dir": str(case_dir)}
 
     # Load all files from each output directory
@@ -53,9 +61,11 @@ def load_case_record(case_dir, config):
         artifact_dir = case_dir / out_path
         if not artifact_dir.exists():
             continue
+        _resolve_under(case_dir, artifact_dir)
         for f in sorted(artifact_dir.rglob("*")):
-            if not f.is_file():
+            if not f.is_file() or f.is_symlink():
                 continue
+            _resolve_under(case_dir, f)
             rel = str(f.relative_to(case_dir))
             try:
                 record["files"][rel] = f.read_text()
@@ -69,7 +79,7 @@ def load_case_record(case_dir, config):
         if not artifact_dir.exists():
             continue
         for f in sorted(artifact_dir.iterdir()):
-            if f.is_file():
+            if f.is_file() and not f.is_symlink():
                 key = Path(out_path).name or "main"
                 try:
                     record[f"{key}_content"] = f.read_text()
@@ -203,11 +213,13 @@ def _load_llm_judge(jc, project_root=None):
         from mlflow.genai.judges import make_judge
     except ImportError:
         raise ImportError("mlflow[genai] required for LLM judges")
+    root = Path(project_root).resolve() if project_root else Path.cwd().resolve()
     prompt = jc.prompt
     if not prompt and jc.prompt_file:
         prompt_path = Path(jc.prompt_file)
-        if project_root and not prompt_path.is_absolute():
-            prompt_path = project_root / prompt_path
+        if not prompt_path.is_absolute():
+            prompt_path = root / prompt_path
+        _resolve_under(root, prompt_path)
         if not prompt_path.exists():
             raise FileNotFoundError(f"Judge prompt not found: {prompt_path}")
         prompt = prompt_path.read_text()
@@ -216,8 +228,9 @@ def _load_llm_judge(jc, project_root=None):
     # Append context files to the prompt
     for ctx_path in jc.context:
         path = Path(ctx_path)
-        if project_root and not path.is_absolute():
-            path = project_root / path
+        if not path.is_absolute():
+            path = root / path
+        _resolve_under(root, path)
         if path.exists():
             prompt += f"\n\n## Context: {path.name}\n\n{path.read_text()}"
     kwargs = {"name": jc.name, "instructions": prompt}

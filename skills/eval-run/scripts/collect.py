@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -20,6 +21,14 @@ from pathlib import Path
 import yaml
 
 from agent_eval.config import EvalConfig
+
+
+def _safe_path_component(value, field):
+    """Reject path components that escape the parent directory."""
+    p = Path(str(value))
+    if p.is_absolute() or ".." in p.parts:
+        raise ValueError(f"{field} must be a relative path without '..': {value}")
+    return str(p)
 
 
 def main():
@@ -46,9 +55,14 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     results = {}
 
+    # Validate case IDs from case_order
+    for entry in case_order:
+        cid = entry["case_id"] if isinstance(entry, dict) else entry
+        _safe_path_component(cid, "case_id")
+
     # Collect from each output directory defined in config
     for output_cfg in config.outputs:
-        out_path = output_cfg.path or "."
+        out_path = _safe_path_component(output_cfg.path or ".", "output path")
         src_dir = workspace / out_path
         if not src_dir.exists():
             continue

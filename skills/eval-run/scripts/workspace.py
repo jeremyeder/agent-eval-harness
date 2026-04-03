@@ -14,8 +14,10 @@ Usage:
 """
 
 import argparse
+import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -51,11 +53,20 @@ def main():
         print("ERROR: no cases found", file=sys.stderr)
         sys.exit(1)
 
-    # Create workspace
-    workspace = Path(f"/tmp/agent-eval/{args.run_id}")
+    # Validate run-id
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", args.run_id):
+        print("ERROR: run-id must match [A-Za-z0-9._-]+", file=sys.stderr)
+        sys.exit(1)
+
+    # Create workspace in secure temp directory
+    base_dir = (Path(tempfile.gettempdir()) / "agent-eval").resolve()
+    workspace = (base_dir / args.run_id).resolve()
+    if base_dir not in workspace.parents and workspace != base_dir:
+        print("ERROR: invalid run-id path", file=sys.stderr)
+        sys.exit(1)
     if workspace.exists():
         shutil.rmtree(workspace)
-    workspace.mkdir(parents=True)
+    workspace.mkdir(parents=True, mode=0o700)
 
     # Create output directories from config
     for output in config.outputs:
@@ -92,6 +103,11 @@ def main():
         if args.symlinks else default_symlinks
     )
     for name in symlink_names:
+        p = Path(name)
+        if p.is_absolute() or ".." in p.parts:
+            print(f"WARNING: skipping invalid symlink entry: {name}",
+                  file=sys.stderr)
+            continue
         target = project_root / name
         link = workspace / name
         if target.exists():

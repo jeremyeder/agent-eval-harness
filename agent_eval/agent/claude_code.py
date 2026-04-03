@@ -174,9 +174,17 @@ class ClaudeCodeRunner(EvalRunner):
             raw_output=raw_output,
         )
 
+    # Environment keys safe to forward to evaluated skills
+    _SAFE_ENV_KEYS = {
+        "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM",
+        "ANTHROPIC_API_KEY", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION",
+        "MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    }
+
     def _build_env(self):
-        """Build subprocess environment."""
-        env = os.environ.copy()
+        """Build subprocess environment with allowlisted keys only."""
+        env = {k: v for k, v in os.environ.items() if k in self._SAFE_ENV_KEYS}
         for key in self._env_strip:
             env.pop(key, None)
         if self._subagent_model:

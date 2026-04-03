@@ -7,6 +7,16 @@ from typing import Optional
 import yaml
 
 
+def _validate_relative_path(value: str, field_name: str) -> str:
+    """Reject absolute or parent-traversing paths."""
+    if not value:
+        return value
+    p = Path(value)
+    if p.is_absolute() or ".." in p.parts:
+        raise ValueError(f"{field_name} must be a relative path without '..': {value}")
+    return value
+
+
 @dataclass
 class OutputConfig:
     """One output artifact directory with a natural language schema."""
@@ -94,14 +104,16 @@ class EvalConfig:
             runner_options=raw.get("runner_options", {}),
             permissions=raw.get("permissions", {}),
             mlflow_experiment=raw.get("mlflow_experiment", raw.get("name", "")),
-            dataset_path=dataset.get("path", ""),
+            dataset_path=_validate_relative_path(
+                dataset.get("path", ""), "dataset.path"),
             dataset_schema=dataset.get("schema", ""),
         )
 
         # Outputs
-        for o in raw.get("outputs", []):
+        for i, o in enumerate(raw.get("outputs", [])):
             config.outputs.append(OutputConfig(
-                path=o.get("path", ""),
+                path=_validate_relative_path(
+                    o.get("path", ""), f"outputs[{i}].path"),
                 schema=o.get("schema", ""),
             ))
 
