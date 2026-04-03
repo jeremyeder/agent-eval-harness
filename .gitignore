@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+
+# Eval runs and state
+eval/runs/
+tmp/
+
+# MLflow
+mlflow.db
+mlruns/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
