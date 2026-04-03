@@ -32,8 +32,8 @@ def discover_skills():
                 if content.startswith("---"):
                     fm = yaml.safe_load(content.split("---")[1])
                     desc = fm.get("description", "")[:80]
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  WARNING: failed to parse {path}: {e}", file=sys.stderr)
             skills.append({"name": name, "path": path, "description": desc})
 
     if skills:
@@ -103,7 +103,7 @@ def check_eval_md(path="eval.md"):
     for skills_dir in [Path(".claude/skills"), Path("skills")]:
         skill_path = skills_dir / skill_name / "SKILL.md"
         if skill_path.exists():
-            current_hash = hashlib.md5(skill_path.read_bytes()).hexdigest()[:12]
+            current_hash = hashlib.sha256(skill_path.read_bytes()).hexdigest()[:12]
             if current_hash == stored_hash:
                 print(f"FRESH: {skill_name} (hash={stored_hash})")
                 return

@@ -53,6 +53,10 @@ def main():
 
     # Build runner
     agent = args.agent or config.runner
+    if agent not in RUNNERS:
+        print(f"ERROR: unknown runner '{agent}'. Available: {list(RUNNERS.keys())}",
+              file=sys.stderr)
+        sys.exit(1)
     runner_cls = RUNNERS[agent]
 
     runner = runner_cls(
@@ -68,13 +72,11 @@ def main():
     print(f"Workspace: {args.workspace}", file=sys.stderr)
 
     # Run via the abstraction
-    settings_path = Path(args.settings) if args.settings else None
     result = runner.run_skill(
         skill_name=args.skill,
         args=args.skill_args,
         workspace=Path(args.workspace),
         model=args.model,
-        settings_path=settings_path,
         max_budget_usd=args.max_budget,
         timeout_s=args.timeout,
     )

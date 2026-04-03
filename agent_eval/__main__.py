@@ -95,7 +95,7 @@ def _check_eval_md(path):
     for skills_dir in [Path(".claude/skills"), Path("skills")]:
         skill_path = skills_dir / skill_name / "SKILL.md"
         if skill_path.exists():
-            current_hash = hashlib.md5(skill_path.read_bytes()).hexdigest()[:12]
+            current_hash = hashlib.sha256(skill_path.read_bytes()).hexdigest()[:12]
             if current_hash == stored_hash:
                 print("FRESH")
                 return
@@ -119,7 +119,7 @@ def _write_eval_md(path, skill, data_yaml):
     for skills_dir in [Path(".claude/skills"), Path("skills")]:
         skill_path = skills_dir / skill / "SKILL.md"
         if skill_path.exists():
-            skill_hash = hashlib.md5(skill_path.read_bytes()).hexdigest()[:12]
+            skill_hash = hashlib.sha256(skill_path.read_bytes()).hexdigest()[:12]
             break
 
     fm = {
@@ -135,4 +135,5 @@ def _write_eval_md(path, skill, data_yaml):
     print(f"Written: {path}")
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -125,17 +125,21 @@ def _read_input(case_dir):
     Tries .yaml/.yml first, then .json.
     """
     for name in sorted(case_dir.iterdir()):
-        if name.is_file() and name.suffix in (".yaml", ".yml"):
-            with open(name) as f:
-                data = yaml.safe_load(f)
-            if isinstance(data, dict):
-                return data
-        elif name.is_file() and name.suffix == ".json":
-            import json
-            with open(name) as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                return data
+        try:
+            if name.is_file() and name.suffix in (".yaml", ".yml"):
+                with open(name) as f:
+                    data = yaml.safe_load(f)
+                if isinstance(data, dict):
+                    return data
+            elif name.is_file() and name.suffix == ".json":
+                import json
+                with open(name) as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            print(f"WARNING: failed to parse {name}: {e}", file=sys.stderr)
+            continue
     return None
 
 

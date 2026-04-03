@@ -20,15 +20,15 @@ Parse `$ARGUMENTS` for:
 - `--no-judge` (skip LLM judges)
 - `--gold` (save outputs as gold references after run)
 
-Check if eval.yaml exists:
+Check if the config file exists (use the parsed config path, not hardcoded `eval.yaml`):
 
 ```bash
-test -f eval.yaml && echo "CONFIG_EXISTS" || echo "NO_CONFIG"
+test -f <config> && echo "CONFIG_EXISTS" || echo "NO_CONFIG"
 ```
 
-**If eval.yaml is missing**: invoke eval-analyze to bootstrap:
+**If config is missing**: invoke eval-analyze to bootstrap:
 
-```
+```text
 Use the Skill tool to invoke /eval-analyze [--skill <skill>]
 ```
 
@@ -138,7 +138,7 @@ Present a structured report to the user. Be decisive — state assessments, not 
 
 If `mlflow_experiment` is configured in eval.yaml:
 
-```
+```text
 Use the Skill tool to invoke /eval-mlflow --action log-results --run-id <id> --config <config>
 ```
 

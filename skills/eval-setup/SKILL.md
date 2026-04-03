@@ -104,7 +104,7 @@ if config.mlflow_experiment:
     print(f'Experiment created: {config.mlflow_experiment}')
 else:
     print('No mlflow_experiment in eval.yaml, skipping')
-" 2>/dev/null || echo "eval.yaml not found, skipping experiment creation"
+" || echo "eval.yaml not found or invalid, skipping experiment creation"
 ```
 
 ## Step 7: Final Verification

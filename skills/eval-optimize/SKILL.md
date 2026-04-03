@@ -9,7 +9,7 @@ Automated refinement loop for skills based on evaluation feedback.
 
 ## Usage
 
-```
+```text
 /eval-optimize [config_file] --model <model> [--max-iterations <N>]
 ```
 
@@ -38,7 +38,7 @@ This skill implements the refinement loop from the MLflow skill evaluation metho
 3. **Iteration loop** (up to max-iterations):
 
    a. Run eval by invoking the eval-run skill:
-   ```
+   ```text
    Use the Skill tool to invoke /eval-run --config <config> --model <model> --run-id <id>-iter-<N> --score
    ```
 
@@ -56,7 +56,7 @@ This skill implements the refinement loop from the MLflow skill evaluation metho
       - **Important**: the fix must be specific and grounded in the trace evidence, not a generic instruction
 
    e. After fixing, re-run eval to verify:
-   ```
+   ```text
    Use the Skill tool to invoke /eval-run --config <config> --model <model> --run-id <id>-iter-<N+1> --score --baseline <id>-iter-<N>
    ```
 

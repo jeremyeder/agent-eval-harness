@@ -47,6 +47,10 @@ def main():
 
     cmd = sys.argv[1]
 
+    if cmd in ("init", "set", "read", "write-ids", "read-ids") and len(sys.argv) < 3:
+        print(f"Usage: state.py {cmd} <path> [args]", file=sys.stderr)
+        sys.exit(1)
+
     if cmd == "init":
         path = Path(sys.argv[2])
         path.parent.mkdir(parents=True, exist_ok=True)

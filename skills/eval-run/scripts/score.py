@@ -122,6 +122,8 @@ def load_judges(config, project_root=None):
 
 def score_cases(judges, case_dirs, config):
     """Score all cases with all judges in parallel."""
+    if not case_dirs:
+        return {"per_case": {}, "aggregated": {n: {"values": [], "mean": None, "pass_rate": None} for n, _ in judges}}
     per_case = {}
     aggregated = {name: {"values": []} for name, _ in judges}
     parallelism = min(len(case_dirs), os.cpu_count() or 4)
@@ -499,7 +501,7 @@ def cmd_judges(args):
                 print(f"    [{r.judge_name}] {r.metric}: "
                       f"{r.baseline_value} -> {r.current_value}")
         else:
-            print(f"\n  REGRESSIONS: 0")
+            print("\n  REGRESSIONS: 0")
 
 
 def cmd_pairwise(args):
