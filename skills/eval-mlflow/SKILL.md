@@ -42,87 +42,46 @@ Read eval.yaml to understand:
 
 ## Step 3: Sync Dataset (if `--action sync-dataset` or `all`)
 
-Read the `dataset.schema` from eval.yaml. Browse the case directories at `dataset.path`.
-
-For each case directory:
-1. Read all files in the case
-2. Using your understanding of `dataset.schema`, identify what is an input and what is a reference/expectation
-3. Build an MLflow record: `{"inputs": {...}, "expectations": {...}}`
-
-Then push all records to MLflow:
+Sync evaluation cases to MLflow dataset:
 
 ```bash
-python3 -c "
-import mlflow
-from mlflow.genai.datasets import create_dataset, get_dataset
-
-mlflow.set_experiment('<experiment_name>')
-
-try:
-    dataset = get_dataset(name='<dataset_name>')
-except:
-    dataset = create_dataset(name='<dataset_name>')
-
-records = <records_list>
-dataset.merge_records(records)
-print(f'Synced {len(records)} cases')
-"
+python3 ${CLAUDE_SKILL_DIR}/scripts/sync_dataset.py \
+    --config eval.yaml \
+    --dataset-name "${mlflow_experiment}-dataset"
 ```
 
-The key: you interpret the schema and build the records — no hardcoded field mappings.
+The script reads `dataset.schema` from eval.yaml and browses case directories at `dataset.path`. For each case, it classifies files as inputs vs expectations using a naming heuristic (input*/prompt* → inputs, expected*/reference* → expectations) and syncs to MLflow.
 
 ## Step 4: Log Run Results (if `--action log-results` or `all`)
 
-Read the scoring results from `eval/runs/<run-id>/summary.yaml`.
-
-Log to MLflow:
+Log run results to MLflow:
 
 ```bash
-python3 -c "
-import mlflow
-
-mlflow.set_experiment('<experiment_name>')
-
-with mlflow.start_run(run_name='<run_id>'):
-    # Params
-    mlflow.log_param('skill', '<skill>')
-    mlflow.log_param('runner', '<runner>')
-    mlflow.log_param('model', '<model>')
-
-    # Metrics from summary
-    <for each judge, log mean/pass_rate as mlflow.log_metric(...)>
-
-    # Tags
-    mlflow.set_tag('regressions_detected', '<yes|no>')
-
-    # Artifact
-    mlflow.log_artifact('eval/runs/<run_id>/summary.yaml')
-"
+python3 ${CLAUDE_SKILL_DIR}/scripts/log_results.py \
+    --config eval.yaml \
+    --run-id <run_id>
 ```
+
+The script reads `summary.yaml` and `run_result.json` from the run directory, then logs:
+- **Parameters**: skill, agent (runner), model
+- **Metrics**: judge scores (mean/pass_rate), duration, cost, tokens
+- **Tags**: regressions_detected, exit_code
+- **Artifacts**: summary.yaml
 
 ## Step 5: Attach Trace Feedback (if traces exist)
 
-If MLflow tracing was enabled during the eval run, search for traces and attach judge feedback:
+If MLflow tracing was enabled during the eval run, attach judge feedback to traces:
 
 ```bash
-python3 -c "
-import mlflow
-from mlflow.entities.assessment import AssessmentSource
-
-source = AssessmentSource(source_type='CODE', source_id='agent-eval')
-
-# Search for traces from this run
-traces = mlflow.search_traces(
-    experiment_ids=['<experiment_id>'],
-    max_results=100,
-)
-
-# For each case with judge results, find matching trace and attach feedback
-<for each case_id, judge_name, value, rationale:
-    mlflow.log_feedback(trace_id=..., name=judge_name, value=value,
-                        source=source, rationale=rationale)>
-"
+python3 ${CLAUDE_SKILL_DIR}/scripts/attach_feedback.py \
+    --config eval.yaml \
+    --run-id <run_id> \
+    --experiment <experiment_name>
 ```
+
+The script searches for traces in the experiment and attempts to match them to cases by `case_id` tags. For matched traces, it attaches judge scores as feedback.
+
+**Note**: This requires traces to be tagged with `case_id` during execution. If no traces are found or traces lack case_id tags, the script will warn and exit gracefully (this is expected until case_id tagging is added to the runner).
 
 ## Step 6: Report
 
