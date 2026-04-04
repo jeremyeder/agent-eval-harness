@@ -7,12 +7,12 @@
 
 **Purpose**: Merge eval harness code, extend env allowlist, add dependencies
 
-- [ ] T001 [US4] Merge pr-01 branch into working branch so eval harness code is on disk
-- [ ] T002 [US4] Extend `_SAFE_ENV_KEYS` in `agent_eval/agent/claude_code.py` to add JIRA_SERVER, JIRA_USER, JIRA_TOKEN, RFE_MODEL, RFE_MODEL_CONFIG, GITHUB_TOKEN
-- [ ] T003 [US4] Add mlflow-export-import to optional dependencies in `pyproject.toml`
-- [ ] T004 [US4] Install agent-eval-harness package: `pip install -e .[anthropic]`
+- [X] T001 [US4] Merge pr-01 branch into working branch so eval harness code is on disk
+- [X] T002 [US4] Extend `_SAFE_ENV_KEYS` in `agent_eval/agent/claude_code.py` to add JIRA_SERVER, JIRA_USER, JIRA_TOKEN, RFE_MODEL, RFE_MODEL_CONFIG, GITHUB_TOKEN
+- [X] T003 [US4] Add mlflow-export-import to optional dependencies in `pyproject.toml`
+- [X] T004 [US4] Install agent-eval-harness package: `pip install -e .[anthropic]`
 
-**Checkpoint**: Eval harness code available and importable
+**Checkpoint**: Eval harness code available and importable ✓
 
 ---
 
@@ -20,15 +20,15 @@
 
 **Goal**: Remove hardcoded model: opus so eval runner controls model selection
 
-- [ ] T005 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/rfe-feasibility-review/SKILL.md`
-- [ ] T006 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/architecture-review/SKILL.md`
-- [ ] T007 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/feasibility-review/SKILL.md`
-- [ ] T008 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/scope-review/SKILL.md`
-- [ ] T009 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/testability-review/SKILL.md`
-- [ ] T010 [US4] Remove `model: opus` from ~7 inline Agent launch instructions in `/workspace/repos/rfe-creator/.claude/skills/rfe.review/SKILL.md`
-- [ ] T011 [US4] Remove `model: opus` from inline Agent launch instruction in `/workspace/repos/rfe-creator/.claude/skills/rfe.split/SKILL.md`
+- [X] T005 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/rfe-feasibility-review/SKILL.md`
+- [X] T006 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/architecture-review/SKILL.md`
+- [X] T007 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/feasibility-review/SKILL.md`
+- [X] T008 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/scope-review/SKILL.md`
+- [X] T009 [P] [US4] Remove `model: opus` from frontmatter in `/workspace/repos/rfe-creator/.claude/skills/testability-review/SKILL.md`
+- [X] T010 [US4] Remove `model: opus` from ~7 inline Agent launch instructions in `/workspace/repos/rfe-creator/.claude/skills/rfe.review/SKILL.md`
+- [X] T011 [US4] Remove `model: opus` from inline Agent launch instruction in `/workspace/repos/rfe-creator/.claude/skills/rfe.split/SKILL.md`
 
-**Checkpoint**: All model references removed, eval runner can control model uniformly
+**Checkpoint**: All model references removed, eval runner can control model uniformly ✓
 
 ---
 
@@ -38,16 +38,16 @@
 
 **Independent Test**: Run with 1 model, 1 RFE, 1 rep to validate end-to-end
 
-- [ ] T012 [P] [US1] Create eval dataset: `/workspace/repos/rfe-creator/eval/dataset/cases/RHAIRFE-1473/input.yaml`
-- [ ] T013 [P] [US1] Create eval dataset: `/workspace/repos/rfe-creator/eval/dataset/cases/RHAIRFE-1429/input.yaml`
-- [ ] T014 [P] [US1] Create eval dataset: `/workspace/repos/rfe-creator/eval/dataset/cases/RHAIRFE-1161/input.yaml`
-- [ ] T015 [US1] Create `/workspace/repos/rfe-creator/eval.yaml` with skill, outputs, judges config
-- [ ] T016 [US1] Create `/workspace/repos/rfe-creator/eval/judges/__init__.py`
-- [ ] T017 [US1] Create `/workspace/repos/rfe-creator/eval/judges/frontmatter_judges.py` with score extraction functions
-- [ ] T018 [US1] Create `/workspace/repos/rfe-creator/eval/test_plan.yaml` with models, cases, repetitions
-- [ ] T019 [US1] Create `/workspace/repos/rfe-creator/eval/scripts/run_matrix.py` — orchestrate workspace→execute→collect→score per run
+- [X] T012 [P] [US1] Create eval dataset: `/workspace/repos/rfe-creator/eval/dataset/cases/RHAIRFE-1473/input.yaml`
+- [X] T013 [P] [US1] Create eval dataset: `/workspace/repos/rfe-creator/eval/dataset/cases/RHAIRFE-1429/input.yaml`
+- [X] T014 [P] [US1] Create eval dataset: `/workspace/repos/rfe-creator/eval/dataset/cases/RHAIRFE-1161/input.yaml`
+- [X] T015 [US1] Create `/workspace/repos/rfe-creator/eval.yaml` with skill, outputs, judges config
+- [X] T016 [US1] Create `/workspace/repos/rfe-creator/eval/judges/__init__.py`
+- [X] T017 [US1] Create `/workspace/repos/rfe-creator/eval/judges/frontmatter_judges.py` with score extraction functions
+- [X] T018 [US1] Create `/workspace/repos/rfe-creator/eval/test_plan.yaml` with models, cases, repetitions
+- [X] T019 [US1] Create `/workspace/repos/rfe-creator/eval/scripts/run_matrix.py` — orchestrate workspace→execute→collect→score per run
 
-**Checkpoint**: run_matrix.py can execute a single run and produce run_result.json + summary.yaml
+**Checkpoint**: run_matrix.py can execute a single run and produce run_result.json + summary.yaml ✓
 
 ---
 
@@ -55,10 +55,10 @@
 
 **Goal**: ETL + comparison producing machine-parsable outputs
 
-- [ ] T020 [US2] Create `/workspace/repos/rfe-creator/eval/scripts/etl_loader.py` — walk runs, produce records.json and pareto.csv
-- [ ] T021 [US2] Create `/workspace/repos/rfe-creator/eval/scripts/compare.py` — read records.json, produce comparison.json
+- [X] T020 [US2] Create `/workspace/repos/rfe-creator/eval/scripts/etl_loader.py` — walk runs, produce records.json and pareto.csv
+- [X] T021 [US2] Create `/workspace/repos/rfe-creator/eval/scripts/compare.py` — read records.json, produce comparison.json
 
-**Checkpoint**: Given completed runs, comparison.json has quality, cost, efficiency sections
+**Checkpoint**: Given completed runs, comparison.json has quality, cost, efficiency sections ✓
 
 ---
 
@@ -66,10 +66,10 @@
 
 **Goal**: Log to MLflow and export for portability
 
-- [ ] T022 [US3] Add MLflow logging to etl_loader.py — log params, metrics, artifacts per run
-- [ ] T023 [US3] Add mlflow-export-import export step to etl_loader.py
+- [X] T022 [US3] Add MLflow logging to etl_loader.py — log params, metrics, artifacts per run
+- [X] T023 [US3] Add mlflow-export-import export step to etl_loader.py
 
-**Checkpoint**: Results visible in MLflow UI and exportable
+**Checkpoint**: Results visible in MLflow UI and exportable ✓
 
 ---
 
