@@ -61,9 +61,13 @@ def load_case(case_dir: Path, config: EvalConfig) -> dict:
         rel_path = str(file_path.relative_to(case_dir))
         file_name = file_path.name.lower()
 
-        # Read file content
+        # Read file content (with size limit to prevent memory exhaustion)
+        max_size = 10 * 1024 * 1024  # 10MB limit
         try:
-            content = file_path.read_text()
+            if file_path.stat().st_size > max_size:
+                content = f"<file too large: {file_path.name}>"
+            else:
+                content = file_path.read_text()
         except UnicodeDecodeError:
             content = f"<binary: {file_path.name}>"
 
