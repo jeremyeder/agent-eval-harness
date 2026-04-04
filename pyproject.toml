@@ -17,4 +17,8 @@ dependencies = [
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
 anthropic-vertex = ["anthropic[vertex]>=0.40"]
+export = ["mlflow-export-import"]
+
+[tool.setuptools.packages.find]
+include = ["agent_eval*"]
 

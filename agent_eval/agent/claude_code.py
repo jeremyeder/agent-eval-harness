@@ -180,6 +180,9 @@ class ClaudeCodeRunner(EvalRunner):
         "ANTHROPIC_API_KEY", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION",
         "MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME",
         "CLAUDE_CODE_SUBAGENT_MODEL",
+        "JIRA_SERVER", "JIRA_USER", "JIRA_TOKEN",
+        "RFE_MODEL", "RFE_MODEL_CONFIG",
+        "GITHUB_TOKEN",
     }
 
     def _build_env(self):
