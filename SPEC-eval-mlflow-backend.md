@@ -94,17 +94,20 @@ python3 sync_dataset.py --config eval.yaml --dataset-name <name>
 2. Read `dataset_schema` to understand case structure
 3. Browse directories at `dataset_path`
 4. For each case directory:
-   - Read all files
-   - Interpret which are inputs vs expectations based on schema
+   - Read all files (with path validation)
+   - Classify files as inputs vs expectations using naming heuristic:
+     - Files matching `input*`, `prompt*` → inputs
+     - Files matching `expected*`, `reference*` → expectations
+     - All other files → inputs
    - Build MLflow record: `{"inputs": {...}, "expectations": {...}}`
 5. Use `mlflow.genai.datasets.create_dataset()` or `get_dataset()` + `merge_records()`
 6. Set experiment via `setup_experiment()`
 7. Print: `"Synced N cases to MLflow dataset '<name>'"`
 
 **Key Constraints**:
-- No hardcoded field mappings
-- Schema-driven interpretation
-- Idempotent (safe to run multiple times)
+- Schema-driven interpretation (v1: naming heuristic, future: LLM-based)
+- Path safety: validate all paths to prevent traversal attacks
+- Idempotent (safe to run multiple times - datasets merge/deduplicate)
 - ~80 lines
 
 ### 2. log_results.py
@@ -129,18 +132,20 @@ python3 log_results.py --config eval.yaml --run-id <id>
 4. Call `setup_experiment(config.mlflow_experiment)`
 5. Create MLflow run with `mlflow.start_run(run_name=run_id)`
 6. Log parameters:
-   - `skill`: from config or summary
-   - `runner`: from run_result.json
-   - `model`: from config or summary
+   - `skill`: from `config.skill` (eval.yaml)
+   - `agent`: from `run_result.json["agent"]`
+   - `model`: from config runtime overrides or eval.yaml
 7. Log metrics:
    - For each judge: `{judge_name}_mean`, `{judge_name}_pass_rate`
    - `duration_s`, `cost_usd`, `total_tokens`
 8. Set tags:
-   - `regressions_detected`: "yes" or "no"
+   - `regressions_detected`: "yes" or "no" (from summary.yaml)
    - `exit_code`: from run_result.json
 9. Log artifacts:
    - `eval/runs/<run-id>/summary.yaml`
 10. Print: MLflow UI link and summary
+
+**Path Safety**: Use path validation to prevent directory traversal (similar to score.py's `_resolve_under()`)
 
 **Key Constraints**:
 - Use existing `setup_experiment()` helper
@@ -168,13 +173,14 @@ python3 attach_feedback.py --config eval.yaml --run-id <id> --experiment <name>
 2. Read `eval/runs/<run-id>/summary.yaml` for per_case judge results
 3. Use `mlflow.search_traces(experiment_ids=[...])` to find traces
 4. For each trace:
-   - Match to case by trace metadata (case_id tag or similar)
-   - For each judge result, call `agent_eval.mlflow.experiment.log_feedback()`
+   - Try to match case by trace tags (e.g., `tags.case_id`)
+   - If match found, call `agent_eval.mlflow.experiment.log_feedback()` for each judge
 5. Print: `"Attached feedback to N traces"`
 
 **Key Constraints**:
 - Use existing `log_feedback()` helper
-- Graceful handling if no traces exist
+- Graceful handling if no traces exist (print warning, exit 0)
+- **Note**: Trace-to-case matching requires traces to be tagged with case_id during execution (future enhancement)
 - ~70 lines
 
 ### 4. Update SKILL.md

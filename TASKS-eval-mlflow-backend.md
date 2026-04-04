@@ -16,15 +16,20 @@
 - [ ] Create `skills/eval-mlflow/scripts/sync_dataset.py` file
 - [ ] Add shebang and module docstring with usage
 - [ ] Import dependencies (argparse, sys, Path, yaml, mlflow, EvalConfig)
+- [ ] Add `_resolve_under()` helper for path safety (from score.py pattern)
 - [ ] Implement `load_case(case_dir, config)` function
-  - [ ] Read all files in case directory
-  - [ ] Classify files as inputs vs expectations by naming heuristic
+  - [ ] Validate case_dir with path safety check
+  - [ ] Read all files in case directory (validate each path)
+  - [ ] Classify files by naming heuristic:
+    - [ ] `input*`, `prompt*` → inputs
+    - [ ] `expected*`, `reference*` → expectations
+    - [ ] All others → inputs
   - [ ] Return dict with `{"inputs": {...}, "expectations": {...}}`
 - [ ] Implement `main()` function
   - [ ] Parse CLI arguments (--config, --dataset-name)
-  - [ ] Load EvalConfig from YAML
+  - [ ] Load EvalConfig from YAML (validate path)
   - [ ] Call setup_experiment()
-  - [ ] Browse dataset_path for case directories
+  - [ ] Browse dataset_path for case directories (validate paths)
   - [ ] Load each case with load_case()
   - [ ] Get or create MLflow dataset
   - [ ] Merge records into dataset
@@ -41,12 +46,15 @@
   - [ ] Parse CLI arguments (--config, --run-id)
   - [ ] Load EvalConfig from YAML
   - [ ] Call setup_experiment()
-  - [ ] Load summary.yaml from eval/runs/<run-id>/
-  - [ ] Load run_result.json from eval/runs/<run-id>/
+  - [ ] Validate and load summary.yaml from eval/runs/<run-id>/
+  - [ ] Validate and load run_result.json from eval/runs/<run-id>/
   - [ ] Start MLflow run with mlflow.start_run(run_name=run_id)
-  - [ ] Log parameters (skill, runner, model)
+  - [ ] Log parameters:
+    - [ ] `skill` from config.skill (eval.yaml)
+    - [ ] `agent` from run_result.json["agent"] (not "runner")
+    - [ ] `model` from config
   - [ ] Log metrics (judge means/pass_rates, duration_s, cost_usd, tokens)
-  - [ ] Set tags (regressions_detected, exit_code)
+  - [ ] Set tags (regressions_detected from summary, exit_code from run_result)
   - [ ] Log artifact (summary.yaml)
   - [ ] Print summary with MLflow UI link
 - [ ] Add error handling for missing files
@@ -61,17 +69,18 @@
 - [ ] Implement `main()` function
   - [ ] Parse CLI arguments (--config, --run-id, --experiment)
   - [ ] Load EvalConfig from YAML
-  - [ ] Determine experiment name (from args or config)
+  - [ ] Determine experiment name (from args or config.mlflow_experiment)
   - [ ] Get MLflow experiment by name
-  - [ ] Load summary.yaml per_case results
-  - [ ] Search for traces with mlflow.search_traces()
-  - [ ] For each trace:
-    - [ ] Extract case_id from trace metadata/tags
-    - [ ] Find matching per_case results
-    - [ ] For each judge result, call log_feedback()
-  - [ ] Print summary (N traces, N feedback attached)
+  - [ ] Validate and load summary.yaml per_case results
+  - [ ] Try to search for traces with mlflow.search_traces()
+  - [ ] For each trace found:
+    - [ ] Try to extract case_id from trace tags (tags.case_id)
+    - [ ] If match found in per_case results, call log_feedback() for each judge
+  - [ ] Print summary (N traces found, N feedback attached)
+  - [ ] If no traces: print warning, exit 0 (graceful)
+  - [ ] If traces but no case_id tags: print warning, exit 0 (expected until tagging added)
 - [ ] Add error handling for missing experiment/traces
-- [ ] Graceful handling if no traces found (exit 0)
+- [ ] Graceful handling if no traces found (print warning, exit 0)
 - [ ] Add `if __name__ == "__main__": main()`
 
 ### Update SKILL.md

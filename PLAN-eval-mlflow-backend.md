@@ -52,14 +52,16 @@ All already satisfied:
 
 ### 1. Schema Interpretation
 
-**Decision**: Defer to LLM for schema interpretation (future enhancement)
+**Decision**: Use naming heuristic for v1 (LLM-based interpretation is future enhancement)
 
-**Rationale**: The spec says "no hardcoded field mappings" and "schema-driven." However, implementing full NL schema interpretation requires an LLM call. For this iteration, we'll use a simple heuristic:
+**Rationale**: The spec says "schema-driven" but implementing full NL schema interpretation requires an LLM call. For this iteration, we'll use a simple heuristic:
 - Files matching `input*` or `prompt*` → inputs
 - Files matching `expected*` or `reference*` → expectations
 - All other files → inputs
 
 **Future**: Add LLM-based schema interpretation similar to how judges work.
+
+**Documented in spec**: v1 uses naming heuristic, documented as acceptable approach.
 
 ### 2. Error Handling
 
@@ -90,7 +92,18 @@ This handles both creating and setting the experiment.
 
 **Rationale**: Makes it easy to find runs in MLflow UI by run-id.
 
-### 5. Trace Matching
+### 5. Field Name Corrections
+
+**Decision**: Use actual field names from run_result.json
+
+**Fields**:
+- `agent` (not "runner") - from run_result.json
+- `skill` - from config.skill (eval.yaml)
+- `model` - from config runtime overrides
+
+**Rationale**: Match actual data structure from execute.py output.
+
+### 6. Trace Matching
 
 **Strategy**: Match traces by case_id in trace tags/request_metadata
 
@@ -101,7 +114,9 @@ traces = mlflow.search_traces(
 )
 ```
 
-**Fallback**: If no case_id tags, skip trace feedback (print warning).
+**Limitation**: Current execute.py does not tag traces with case_id. This is a future enhancement.
+
+**v1 Behavior**: If no traces found with case_id tags, print warning and exit 0 (graceful degradation).
 
 ## Implementation Details
 
@@ -132,8 +147,11 @@ def load_case(case_dir: Path, config: EvalConfig) -> dict:
     Returns:
         {"inputs": {...}, "expectations": {...}}
     """
-    # Read all files
-    # Classify by naming heuristic
+    # Read all files (with path validation)
+    # Classify by naming heuristic:
+    #   - input*, prompt* → inputs
+    #   - expected*, reference* → expectations  
+    #   - other → inputs
     # Return structured record
 
 
@@ -185,10 +203,13 @@ def main():
     config = EvalConfig.from_yaml(args.config)
     setup_experiment(config.mlflow_experiment)
     
-    # Load summary.yaml
-    # Load run_result.json
+    # Load summary.yaml (with path validation)
+    # Load run_result.json (with path validation)
     # Start MLflow run
-    # Log params, metrics, tags, artifacts
+    # Log params: skill (from config.skill), agent (from run_result.json["agent"]), model
+    # Log metrics: judge scores, duration_s, cost_usd, tokens
+    # Set tags: regressions_detected, exit_code
+    # Log artifacts: summary.yaml
     # Print summary with UI link
 ```
 
@@ -226,10 +247,11 @@ def main():
     experiment = args.experiment or config.mlflow_experiment
     
     # Get experiment ID
-    # Search traces
+    # Search traces (if any exist)
     # Load per_case results from summary
-    # Match and attach feedback
-    # Print summary
+    # Try to match traces by case_id tags
+    # If matches found, attach feedback
+    # Print summary (warn if no traces/matches)
 ```
 
 **Size estimate**: 70 lines
@@ -310,10 +332,11 @@ python3 skills/eval-mlflow/scripts/attach_feedback.py \
 | Risk | Mitigation |
 |------|-----------|
 | MLflow API changes | Use stable `mlflow[genai]>=3.5` API, minimal usage |
-| Schema interpretation too simplistic | Document limitation, plan for LLM enhancement |
+| Schema interpretation too simplistic | Document limitation (v1: heuristic, future: LLM) |
 | Trace matching fails | Graceful degradation, clear error messages |
-| Missing traces | Exit 0 with warning (expected in some cases) |
-| Path traversal vulnerabilities | Use `Path.resolve()` and `is_relative_to()` checks |
+| Missing traces | Exit 0 with warning (expected until case_id tagging added) |
+| Path traversal vulnerabilities | **CRITICAL**: Add `_resolve_under()` helper (from score.py) |
+| Field name mismatches | **FIXED**: Use "agent" not "runner", clarified "skill" source |
 
 ## Out of Scope
 
