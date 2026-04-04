@@ -1,0 +1,20 @@
+models:
+  - name: opus
+    model_id: claude-opus-4-6
+    subagent_model: claude-opus-4-6
+  - name: sonnet
+    model_id: claude-sonnet-4-6
+    subagent_model: claude-sonnet-4-6
+
+cases:
+  - RHAIRFE-1473
+  - RHAIRFE-1429
+  - RHAIRFE-1161
+
+repetitions: 3
+
+execution:
+  max_budget_usd: 10.0
+  timeout_s: 1800
+  headless: true
+  dry_run: true
