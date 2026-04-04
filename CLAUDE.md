@@ -26,7 +26,8 @@ skills/eval-setup/       # Skill: environment setup
 skills/eval-analyze/     # Skill: bootstrap eval config
   SKILL.md               # Analyze skill, generate eval.yaml + eval.md
   scripts/
-    discover.py          # Skills and config discovery
+    find_skills.py       # Skill discovery (reads plugin.json for paths)
+    validate_eval.py     # Config and memory validation
   prompts/
     analyze-skill.md     # Skill analysis prompt
     generate-eval-md.md  # eval.md generation prompt
