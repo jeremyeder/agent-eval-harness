@@ -48,6 +48,7 @@ class ClaudeCodeRunner(EvalRunner):
         mlflow_tracking_uri: Optional[str] = None,
         log_prefix: Optional[str] = None,
         effort: Optional[str] = None,
+        bare: bool = True,
     ):
         self._permissions = permissions or {}
         self._subagent_model = subagent_model
@@ -57,6 +58,7 @@ class ClaudeCodeRunner(EvalRunner):
         self._mlflow_experiment = mlflow_experiment
         self._mlflow_tracking_uri = mlflow_tracking_uri
         self._log_prefix = log_prefix
+        self._bare = bare
         if effort and effort not in self._VALID_EFFORTS:
             raise ValueError(
                 f"Invalid effort '{effort}'. "
@@ -98,6 +100,8 @@ class ClaudeCodeRunner(EvalRunner):
             # survive long enough for the SubagentStop hook to copy them.
             # The session directory is cleaned up post-run (see below).
         ]
+        if self._bare:
+            cmd.append("--bare")
         if self._log_prefix:
             cmd.append("--verbose")
 

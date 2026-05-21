@@ -149,6 +149,7 @@ def main():
         mlflow_experiment=mlflow_experiment,
         mlflow_tracking_uri=config.mlflow.tracking_uri,
         effort=effort,
+        bare=effective_runner_config.bare,
     )
     runner = runner_cls(log_prefix="eval", **runner_kwargs)
 

@@ -116,6 +116,18 @@ class VariantConfig:
 
 
 @dataclass
+class MemoryVariantConfig:
+    """Context/memory system available during evaluation.
+
+    Controls what project context files are present in the workspace.
+    """
+    name: str = ""
+    description: str = ""
+    symlinks: list = field(default_factory=list)  # Files/dirs to symlink in
+    setup_command: str = ""  # Shell command to run after workspace setup
+
+
+@dataclass
 class ExecutionConfig:
     """How the skill is invoked against test cases.
 
@@ -161,6 +173,7 @@ class RunnerConfig:
     env_strip: list = field(default_factory=list)
     system_prompt: Optional[str] = None
     effort: Optional[str] = None  # Claude Code: low | medium | high | xhigh | max
+    bare: bool = True  # Clean room: --bare skips hooks, plugins, CLAUDE.md, memory
 
 
 @dataclass
@@ -268,6 +281,7 @@ class EvalConfig:
     # Multi-phase evaluation (e.g., planning → building)
     phases: list = field(default_factory=list)       # List[PhaseConfig]
     variants: list = field(default_factory=list)     # List[VariantConfig]
+    memory_variants: list = field(default_factory=list)  # List[MemoryVariantConfig]
 
     # Regression thresholds
     thresholds: dict = field(default_factory=dict)
@@ -311,6 +325,7 @@ class EvalConfig:
             env_strip=runner_raw.get("env_strip", []) or [],
             system_prompt=runner_raw.get("system_prompt"),
             effort=runner_raw.get("effort"),
+            bare=runner_raw.get("bare", True),
         )
 
         # Models block
@@ -462,6 +477,15 @@ class EvalConfig:
             config.variants.append(VariantConfig(
                 name=v.get("name", ""),
                 phases=v.get("phases", {}),
+            ))
+
+        # Memory variants (context systems for comparison)
+        for mv in raw.get("memory_variants", []):
+            config.memory_variants.append(MemoryVariantConfig(
+                name=mv.get("name", ""),
+                description=mv.get("description", ""),
+                symlinks=mv.get("symlinks", []) or [],
+                setup_command=mv.get("setup_command", ""),
             ))
 
         return config

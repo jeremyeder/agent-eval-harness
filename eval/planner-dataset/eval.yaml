@@ -91,21 +91,42 @@ variants:
       building:
         skill: superpowers:executing-plans
 
-  - name: plan-mode
+  - name: claude-plan
     phases:
       planning:
         skill: ""
+        arguments: "{prompt}"
         runner:
           system_prompt: >
-            Create a detailed implementation plan for the given requirements.
-            Write the plan to output/plan.md. Do NOT implement any code —
-            only produce the plan document.
+            You MUST use the EnterPlanMode tool to plan this project.
+            Once in plan mode, explore the requirements thoroughly,
+            then write your plan to output/plan.md.
+            Call ExitPlanMode when your plan is complete.
+            Do NOT implement any code — only produce the plan.
       building:
         skill: ""
         runner:
           system_prompt: >
             Implement the project described in the plan provided as input.
             Follow the plan closely. Write all code, tests, and configuration.
+
+memory_variants:
+  - name: none
+    description: "No project memory — planner gets only the prompt"
+    symlinks: []
+
+  - name: flat-files
+    description: "In-repo flat files (CLAUDE.md, docs/, README)"
+    symlinks: [CLAUDE.md, docs, README.md]
+
+  - name: beads
+    description: "Beads issue tracker context"
+    symlinks: [CLAUDE.md, .beads]
+    setup_command: "bd prime > .context/beads-context.md 2>/dev/null || true"
+
+  - name: llm-wiki
+    description: "In-repo compiled wiki (llm-wiki-compiler output)"
+    symlinks: [CLAUDE.md, .wiki]
 
 models:
   skill: claude-sonnet-4-6

@@ -44,6 +44,8 @@ def main():
                         help="Variant name — apply variant overrides to phase")
     parser.add_argument("--prior-run", default=None,
                         help="Prior phase run directory — inject plan outputs into workspace")
+    parser.add_argument("--memory-variant", default=None,
+                        help="Memory variant name — override symlinks with variant's list")
     args = parser.parse_args()
 
     config = EvalConfig.from_yaml(args.config)
@@ -53,6 +55,16 @@ def main():
         phase = config.resolve_phase(args.phase, args.variant or "")
         if phase and phase.outputs:
             config.outputs = phase.outputs
+
+    # Resolve memory variant for symlink override
+    memory_variant = None
+    if args.memory_variant:
+        memory_variant = next(
+            (mv for mv in config.memory_variants if mv.name == args.memory_variant),
+            None)
+        if not memory_variant:
+            print(f"WARNING: memory variant '{args.memory_variant}' not found",
+                  file=sys.stderr)
 
     cases_dir = Path(config.dataset_path)
     if not cases_dir.exists():
@@ -91,7 +103,8 @@ def main():
 
     # Branch on execution mode
     if config.execution.mode == "case":
-        _create_per_case_workspace(workspace, case_dirs, config, args)
+        _create_per_case_workspace(workspace, case_dirs, config, args,
+                                   memory_variant=memory_variant)
         return
 
     # ── Batch mode (below) ───────────────────────────────────────
@@ -184,7 +197,8 @@ def main():
     print(f"BATCH: {workspace / 'batch.yaml'}")
 
 
-def _create_per_case_workspace(workspace, case_dirs, config, args):
+def _create_per_case_workspace(workspace, case_dirs, config, args,
+                               memory_variant=None):
     """Create a separate workspace per case for per-case execution.
 
     Each case gets its own workspace subdirectory with:
@@ -195,10 +209,12 @@ def _create_per_case_workspace(workspace, case_dirs, config, args):
     """
     project_root = Path.cwd()
     default_symlinks = ["scripts", ".claude", "CLAUDE.md", ".context", "skills"]
-    symlink_names = (
-        [s.strip() for s in args.symlinks.split(",") if s.strip()]
-        if args.symlinks else default_symlinks
-    )
+    if memory_variant:
+        symlink_names = list(memory_variant.symlinks)
+    elif args.symlinks:
+        symlink_names = [s.strip() for s in args.symlinks.split(",") if s.strip()]
+    else:
+        symlink_names = default_symlinks
 
     case_order = []
 
@@ -268,6 +284,14 @@ def _create_per_case_workspace(workspace, case_dirs, config, args):
             _setup_tool_hooks(case_ws, config)
         else:
             _setup_subagent_only_hook(case_ws, config)
+
+        # Run memory variant setup command if defined
+        if memory_variant and memory_variant.setup_command:
+            (case_ws / ".context").mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                memory_variant.setup_command, shell=True,
+                cwd=str(case_ws), capture_output=True, timeout=30,
+            )
 
         case_order.append({"case_id": case_id})
 
