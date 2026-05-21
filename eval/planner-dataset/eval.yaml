@@ -17,6 +17,9 @@ inputs:
         and proceed with the default/recommended option. If asked to choose
         between options, pick the first/recommended one. If asked to confirm
         scope, say "yes, proceed." Never block on user input.
+        For questions about Python version, choose 3.11+.
+        For questions about test scope, choose comprehensive (unit + integration).
+        For questions about architecture, choose the simpler option.
 
 phases:
   - name: planning
@@ -24,8 +27,16 @@ phases:
     arguments: "{prompt}"
     runner:
       system_prompt: >
+        CRITICAL: You are running in AUTONOMOUS HEADLESS mode. There is no human
+        to confirm or clarify. You MUST proceed through ALL steps without stopping
+        to ask for confirmation. Skip scoping synthesis confirmation, skip "shall I
+        proceed?" checkpoints, skip any interactive gates. Just produce the full,
+        complete plan end-to-end in one pass.
+
         Write the complete plan to output/plan.md in the current working directory.
-        The output/ directory already exists. Do not just print the plan — write it to the file.
+        The output/ directory already exists. Do not just print the plan — write it
+        to the file. If you would normally ask the user to confirm scope or choose
+        between options, make the best decision yourself and continue.
     outputs:
       - path: output
         schema: "plan.md — the implementation plan document"
@@ -131,6 +142,7 @@ memory_variants:
 models:
   skill: claude-sonnet-4-6
   judge: claude-opus-4-6
+  hook: claude-haiku-4-5-20251001
 
 runner:
   type: claude-code
@@ -151,7 +163,6 @@ permissions:
     - ExitPlanMode
   deny:
     - "mcp__*"
-    - AskUserQuestion
 
 execution:
   mode: case
