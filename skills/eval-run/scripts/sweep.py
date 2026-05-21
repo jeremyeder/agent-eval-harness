@@ -274,38 +274,78 @@ def main():
 
     # Check for existing issues (resume support)
     existing_output = _bd(["list"], sweep_root)
-    existing_titles = set()
+    resuming = False
     for v in variants:
         for m in memories:
             for r in reps:
                 name = _run_name(v, m, r)
                 if f"{name} planning" in existing_output:
-                    existing_titles.add(f"{name} planning")
-                if f"{name} building" in existing_output:
-                    existing_titles.add(f"{name} building")
+                    resuming = True
+                    break
+            if resuming:
+                break
+        if resuming:
+            break
 
-    # Create issues for each run
-    for v in variants:
-        for m in memories:
-            for r in reps:
-                name = _run_name(v, m, r)
-                plan_title = f"{name} planning"
-                build_title = f"{name} building"
-
-                if plan_title not in existing_titles:
-                    pid = _bd_create(plan_title, "task", sweep_root,
+    if resuming:
+        print("Resuming from existing sweep DB — skipping issue creation")
+        # Rebuild the issue ID maps from existing beads
+        for v in variants:
+            for m in memories:
+                for r in reps:
+                    # Issues exist, we'll find them by title in the main loop
+                    plan_issues[(v, m, r)] = "existing"
+                    build_issues[(v, m, r)] = "existing"
+    else:
+        # Create issues for each run
+        failed_creates = []
+        for v in variants:
+            for m in memories:
+                for r in reps:
+                    name = _run_name(v, m, r)
+                    pid = _bd_create(f"{name} planning", "task", sweep_root,
                                      description=f"variant={v} memory={m} rep={r} phase=planning")
+                    if not pid:
+                        failed_creates.append(f"{name} planning")
                     plan_issues[(v, m, r)] = pid
-                    bid = _bd_create(build_title, "task", sweep_root,
+
+                    bid = _bd_create(f"{name} building", "task", sweep_root,
                                      description=f"variant={v} memory={m} rep={r} phase=building")
+                    if not bid:
+                        failed_creates.append(f"{name} building")
                     build_issues[(v, m, r)] = bid
+
                     if pid and bid:
                         _bd_dep_add(bid, pid, sweep_root)
-                else:
-                    print(f"  Resuming: {name} (issues exist)", file=sys.stderr)
 
-    print(f"\nCreated {len(plan_issues)} planning + {len(build_issues)} building issues")
-    print(f"Starting sweep...\n")
+        if failed_creates:
+            print(f"FATAL: {len(failed_creates)} issues failed to create:",
+                  file=sys.stderr)
+            for name in failed_creates[:10]:
+                print(f"  {name}", file=sys.stderr)
+            sys.exit(1)
+
+    # Validate: check total issue count matches expected
+    stats_output = _bd(["stats"], sweep_root)
+    expected_issues = total_cells * 2
+    print(f"\nExpected {expected_issues} issues:")
+    print(f"  {stats_output.splitlines()[3] if len(stats_output.splitlines()) > 3 else stats_output}")
+
+    created_plan = len([v for v in plan_issues.values() if v])
+    created_build = len([v for v in build_issues.values() if v])
+    if created_plan != total_cells or created_build != total_cells:
+        print(f"FATAL: expected {total_cells} plan + {total_cells} build issues, "
+              f"got {created_plan} + {created_build}", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate: ready count should equal planning issues (building is blocked)
+    ready_ids = _bd_ready(sweep_root)
+    print(f"  Ready (planning): {len(ready_ids)}, Blocked (building): {total_cells}")
+    if not resuming and len(ready_ids) != total_cells:
+        print(f"WARNING: expected {total_cells} ready issues, got {len(ready_ids)}",
+              file=sys.stderr)
+
+    print(f"\nStarting sweep...\n")
 
     # Main execution loop
     total_cost = 0.0
