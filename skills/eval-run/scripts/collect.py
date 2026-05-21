@@ -46,9 +46,19 @@ def main():
     parser.add_argument("--config", default="eval.yaml")
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--phase", default=None,
+                        help="Phase name — use phase's outputs list instead of top-level")
+    parser.add_argument("--variant", default=None,
+                        help="Variant name — apply variant overrides to phase")
     args = parser.parse_args()
 
     config = EvalConfig.from_yaml(args.config)
+
+    # When --phase is set, swap the config's outputs list with the phase's
+    if args.phase:
+        phase = config.resolve_phase(args.phase, args.variant or "")
+        if phase and phase.outputs:
+            config.outputs = phase.outputs
     workspace = Path(args.workspace)
     output_dir = Path(args.output)
 

@@ -1,0 +1,133 @@
+name: planner-comparison
+description: Compare planning approaches (ce-plan vs speckit vs plan-mode) on coding tasks
+
+dataset:
+  path: eval/planner-dataset/cases
+  schema: |
+    Each case has:
+    - prompt: Full requirements/task description for the planner
+    - difficulty: easy|medium|hard
+    - domain: cli|web|data
+
+phases:
+  - name: planning
+    skill: ""
+    arguments: "{prompt}"
+    outputs:
+      - path: output
+        schema: "plan.md — the implementation plan document"
+    judges:
+      - name: plan_completeness
+        prompt: |
+          Review this implementation plan for completeness. Does it cover:
+          - Architecture and file structure
+          - Dependencies and tooling choices
+          - Testing strategy
+          - Error handling approach
+          - Implementation sequence
+
+          Score 1-5 where 5 = comprehensive coverage of all areas.
+          {{ outputs }}
+      - name: plan_actionability
+        prompt: |
+          How actionable is this plan? Could a developer or AI agent follow it
+          to produce working code without significant interpretation or guesswork?
+
+          Score 1-5 where 5 = directly executable with no ambiguity.
+          {{ outputs }}
+
+  - name: building
+    skill: ""
+    arguments: "{plan_content}"
+    outputs:
+      - path: output
+        schema: "Built code artifacts"
+    judges:
+      - name: build_exits_clean
+        check: |
+          code = outputs.get("exit_code", 1)
+          (code == 0, f"Exit code: {code}")
+    build_analysis:
+      - name: tests_passing
+        command: "python -m pytest -q --tb=no 2>&1 | tail -1"
+      - name: source_files
+        command: "find . -name '*.py' -not -path './.git/*' -not -name 'test_*' -not -name '*_test.py' | wc -l"
+      - name: source_loc
+        command: "find . -name '*.py' -not -path './.git/*' -not -name 'test_*' -not -name '*_test.py' -exec cat {} + 2>/dev/null | wc -l"
+      - name: test_files
+        command: "find . -name 'test_*.py' -o -name '*_test.py' | wc -l"
+      - name: test_loc
+        command: "find . -name 'test_*.py' -o -name '*_test.py' -exec cat {} + 2>/dev/null | wc -l"
+      - name: commits
+        command: "git log --oneline 2>/dev/null | wc -l"
+      - name: lint_errors
+        command: "ruff check . --quiet 2>&1 | wc -l"
+
+variants:
+  - name: ce-plan
+    phases:
+      planning:
+        skill: compound-engineering:ce-plan
+      building:
+        skill: compound-engineering:ce-work
+
+  - name: speckit
+    phases:
+      planning:
+        skill: superpowers:writing-plans
+      building:
+        skill: superpowers:executing-plans
+
+  - name: plan-mode
+    phases:
+      planning:
+        skill: ""
+        runner:
+          system_prompt: >
+            Create a detailed implementation plan for the given requirements.
+            Write the plan to output/plan.md. Do NOT implement any code —
+            only produce the plan document.
+      building:
+        skill: ""
+        runner:
+          system_prompt: >
+            Implement the project described in the plan provided as input.
+            Follow the plan closely. Write all code, tests, and configuration.
+
+models:
+  skill: claude-sonnet-4-6
+  judge: claude-opus-4-6
+
+runner:
+  type: claude-code
+  plugin_dirs:
+    - ~/.claude/plugins/cache/compound-engineering
+    - ~/.claude/plugins/cache/superpowers
+
+permissions:
+  allow:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Glob
+    - Grep
+    - Skill
+    - EnterPlanMode
+    - ExitPlanMode
+  deny:
+    - "mcp__*"
+    - AskUserQuestion
+
+execution:
+  mode: case
+  timeout: 3600
+  max_budget_usd: 50.0
+
+thresholds:
+  plan_completeness:
+    min_mean: 3.0
+  plan_actionability:
+    min_mean: 3.0
+  build_exits_clean:
+    min_pass_rate: 0.8

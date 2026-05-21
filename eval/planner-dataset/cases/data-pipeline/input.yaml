@@ -1,0 +1,18 @@
+prompt: |
+  Build a Python data pipeline library called "pipestream" for ETL workflows.
+  Requirements:
+
+  1. Declarative pipeline definition via Python decorators (@stage, @pipeline)
+  2. Built-in stages: read_csv, read_json, filter, transform, deduplicate, write_csv, write_json
+  3. Parallel stage execution with configurable worker count
+  4. Stage-level retry with exponential backoff
+  5. Pipeline execution metrics (rows processed, duration, errors per stage)
+  6. Dry-run mode that validates the pipeline without processing data
+  7. CLI entrypoint: pipestream run pipeline.py --workers 4 --dry-run
+  8. Type-safe stage connections (output type of stage N must match input type of stage N+1)
+  9. Unit tests for each built-in stage and the pipeline runner
+  10. Zero lint errors with ruff, full type hints
+
+  Ship as an installable package with pyproject.toml.
+difficulty: hard
+domain: data

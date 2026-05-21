@@ -64,10 +64,26 @@ def main():
                         help="Claude Code reasoning effort (default: from eval.yaml runner.effort)")
     parser.add_argument("--parallelism", type=int, default=None,
                         help="Max parallel case executions (default: from eval.yaml or sequential)")
+    parser.add_argument("--phase", default=None,
+                        help="Phase name for multi-phase evaluation (from eval.yaml phases)")
+    parser.add_argument("--variant", default=None,
+                        help="Variant name for phase overrides (from eval.yaml variants)")
+    parser.add_argument("--prior-run", default=None,
+                        help="Prior phase run directory (for injecting plan content)")
     args = parser.parse_args()
 
     from agent_eval.config import EvalConfig
     config = EvalConfig.from_yaml(args.config)
+
+    # Phase-aware resolution: when --phase is set, use the phase's skill
+    # and arguments instead of the top-level config.
+    phase = None
+    if args.phase:
+        phase = config.resolve_phase(args.phase, args.variant or "")
+        if not phase:
+            print(f"ERROR: phase '{args.phase}' not found in eval.yaml.",
+                  file=sys.stderr)
+            sys.exit(1)
 
     # Resolve model: CLI > config; required to be set somewhere.
     model = args.model or config.models.skill
@@ -80,8 +96,18 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve skill args: CLI override > config > empty
-    skill_args = args.skill_args if args.skill_args is not None else config.execution.arguments
+    # Resolve skill: when a phase is active, override the CLI --skill with the
+    # phase's skill. The CLI value is already set from --skill (required arg).
+    if phase:
+        args.skill = phase.skill or args.skill
+
+    # Resolve skill args: CLI override > phase > config > empty
+    if args.skill_args is not None:
+        skill_args = args.skill_args
+    elif phase:
+        skill_args = phase.arguments
+    else:
+        skill_args = config.execution.arguments
 
     # Resolve {prompt} placeholder from batch.yaml
     if skill_args and "{prompt}" in skill_args:
@@ -104,7 +130,11 @@ def main():
     runner_cls = RUNNERS[agent]
 
     mlflow_experiment = args.mlflow_experiment or config.mlflow.experiment
-    effort = args.effort or config.runner.effort
+
+    # Phase runner overrides
+    phase_runner = phase.runner if phase else None
+    effective_runner_config = phase_runner or config.runner
+    effort = args.effort or effective_runner_config.effort
 
     # Resolve plugin_dirs relative to project root (CWD) so they survive
     # the workspace CWD change — keeps plugin names stable.
@@ -133,8 +163,8 @@ def main():
                   else config.execution.max_budget_usd if config.execution.max_budget_usd is not None
                   else 100.0)
 
-    # Compose system prompt: runner.system_prompt (if any) + harness prompt.
-    existing_prompt = (config.runner.system_prompt or "").strip()
+    # Compose system prompt: phase runner > top-level runner > harness prompt.
+    existing_prompt = (effective_runner_config.system_prompt or "").strip()
     system_prompt = "\n\n".join(p for p in [existing_prompt, _HARNESS_SYSTEM_PROMPT] if p)
 
     # Capture user-facing eval parameters that defined this run, for the report.
@@ -149,7 +179,9 @@ def main():
                           model, mlflow_experiment, system_prompt,
                           skill_args_template=skill_args,
                           eval_params=eval_params,
-                          parallelism=parallelism)
+                          parallelism=parallelism,
+                          phase=phase,
+                          prior_run_dir=args.prior_run)
         return
 
     # ── Batch execution (below) ──────────────────────────────────
@@ -245,7 +277,7 @@ def _build_eval_params(args, config, skill_args, max_budget, timeout_s, effort=N
 def _run_single_case(runner, skill_name, case_id, case_ws, output_dir,
                      skill_args_template, model, mlflow_experiment,
                      mlflow_tracking_uri, system_prompt, max_budget, timeout_s,
-                     total_cases, index):
+                     total_cases, index, phase=None, prior_run_dir=None):
     """Execute and collect results for a single test case.
 
     Thread-safe: all I/O is to case-specific directories.
@@ -263,6 +295,10 @@ def _run_single_case(runner, skill_name, case_id, case_ws, output_dir,
     if input_path.exists() and case_args:
         case_data = _yaml.safe_load(input_path.read_text()) or {}
         if isinstance(case_data, dict):
+            # Inject plan_content from prior phase if referenced
+            if "{plan_content" in case_args and prior_run_dir:
+                plan_content = _inject_plan_content(case_ws, prior_run_dir, case_id)
+                case_data["plan_content"] = plan_content
             case_args = _resolve_arguments(case_args, case_data)
 
     if mlflow_experiment:
@@ -306,6 +342,11 @@ def _run_single_case(runner, skill_name, case_id, case_ws, output_dir,
             if f.is_file() and not f.is_symlink() and f.suffix == ".jsonl":
                 shutil.copy2(f, out_subagents / f.name)
 
+    # Run build analysis if the phase has analysis commands
+    build_metrics = None
+    if phase and phase.build_analysis:
+        build_metrics = _run_build_analysis(case_ws, phase.build_analysis, case_output)
+
     case_result = {
         "exit_code": result.exit_code,
         "duration_s": round(result.duration_s, 1),
@@ -315,6 +356,8 @@ def _run_single_case(runner, skill_name, case_id, case_ws, output_dir,
         "per_model_usage": result.per_model_usage,
         "per_model_turns": result.per_model_turns,
     }
+    if build_metrics:
+        case_result["build_metrics"] = build_metrics
 
     with open(case_output / "run_result.json", "w") as f:
         json.dump(case_result, f, indent=2)
@@ -331,7 +374,7 @@ def _execute_per_case(args, config, runner, runner_cls, runner_kwargs,
                       output_dir, max_budget, timeout_s,
                       model, mlflow_experiment, system_prompt="",
                       skill_args_template=None, eval_params=None,
-                      parallelism=None):
+                      parallelism=None, phase=None, prior_run_dir=None):
     """Execute the skill once per case with case-specific arguments."""
     import yaml as _yaml
 
@@ -371,7 +414,8 @@ def _execute_per_case(args, config, runner, runner_cls, runner_kwargs,
                     case_ws, output_dir, skill_args_template, model,
                     mlflow_experiment, config.mlflow.tracking_uri,
                     system_prompt, max_budget, timeout_s,
-                    len(case_order), i)
+                    len(case_order), i, phase=phase,
+                    prior_run_dir=prior_run_dir)
                 futures[fut] = case_id
 
             for fut in as_completed(futures):
@@ -386,7 +430,8 @@ def _execute_per_case(args, config, runner, runner_cls, runner_kwargs,
                 runner, args.skill, case_id, case_ws, output_dir,
                 skill_args_template, model, mlflow_experiment,
                 config.mlflow.tracking_uri, system_prompt,
-                max_budget, timeout_s, len(case_order), i)
+                max_budget, timeout_s, len(case_order), i,
+                phase=phase, prior_run_dir=prior_run_dir)
             if result is not None:
                 case_results[case_id] = result
 
@@ -520,6 +565,44 @@ def _save_result(result, args, output_dir, runner, model, eval_params=None):
     print(f"DURATION: {result.duration_s:.0f}s")
     if result.cost_usd:
         print(f"COST: ${result.cost_usd:.2f}")
+
+
+def _run_build_analysis(workspace, analysis_commands, output_dir):
+    """Run post-execution build analysis commands in the workspace."""
+    import subprocess as sp
+    metrics = {}
+    for cmd in analysis_commands:
+        try:
+            result = sp.run(
+                cmd.command, shell=True, cwd=str(workspace),
+                capture_output=True, text=True, timeout=120,
+            )
+            metrics[cmd.name] = result.stdout.strip().split("\n")[-1] if result.stdout.strip() else ""
+        except (sp.TimeoutExpired, OSError) as e:
+            metrics[cmd.name] = f"error: {e}"
+    if metrics:
+        with open(output_dir / "build_metrics.json", "w") as f:
+            json.dump(metrics, f, indent=2)
+            f.write("\n")
+        print(f"  Build metrics: {metrics}", file=sys.stderr)
+    return metrics
+
+
+def _inject_plan_content(case_ws, prior_run_dir, case_id):
+    """Read plan output from prior phase and return as string for argument injection."""
+    prior_case = Path(prior_run_dir) / "cases" / case_id
+    if not prior_case.exists():
+        return ""
+    for out_dir in sorted(prior_case.iterdir()):
+        if not out_dir.is_dir():
+            continue
+        for f in sorted(out_dir.rglob("*")):
+            if f.is_file() and f.suffix in (".md", ".txt", ".yaml"):
+                try:
+                    return f.read_text()
+                except (UnicodeDecodeError, OSError):
+                    continue
+    return ""
 
 
 if __name__ == "__main__":

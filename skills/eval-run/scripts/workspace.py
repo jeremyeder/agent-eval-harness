@@ -38,9 +38,21 @@ def main():
     parser.add_argument("--symlinks", default=None,
                         help="Comma-separated dirs/files to symlink into workspace "
                              "(default: scripts,.claude,CLAUDE.md,.context,skills)")
+    parser.add_argument("--phase", default=None,
+                        help="Phase name — use phase's outputs list for directory setup")
+    parser.add_argument("--variant", default=None,
+                        help="Variant name — apply variant overrides to phase")
+    parser.add_argument("--prior-run", default=None,
+                        help="Prior phase run directory — inject plan outputs into workspace")
     args = parser.parse_args()
 
     config = EvalConfig.from_yaml(args.config)
+
+    # When --phase is set, use the phase's outputs for directory creation
+    if args.phase:
+        phase = config.resolve_phase(args.phase, args.variant or "")
+        if phase and phase.outputs:
+            config.outputs = phase.outputs
 
     cases_dir = Path(config.dataset_path)
     if not cases_dir.exists():
@@ -203,6 +215,11 @@ def _create_per_case_workspace(workspace, case_dirs, config, args):
         if input_src:
             shutil.copy2(input_src, case_ws / input_src.name)
 
+        # Inject prior phase outputs (e.g., plan.md from planning phase)
+        prior_run = getattr(args, "prior_run", None)
+        if prior_run:
+            _inject_prior_phase_outputs(case_ws, Path(prior_run), case_id)
+
         # Create output directories
         for output in config.outputs:
             if output.path and output.path != ".":
@@ -263,6 +280,51 @@ def _create_per_case_workspace(workspace, case_dirs, config, args):
     print(f"CASES: {len(case_dirs)}")
     for entry in case_order:
         print(f"  {entry['case_id']}: {workspace / 'cases' / entry['case_id']}")
+
+
+def _inject_prior_phase_outputs(case_ws, prior_run_dir, case_id):
+    """Copy output files from a prior phase run into the case workspace.
+
+    This makes planning phase outputs (e.g., plan.md) available to the
+    builder phase. Also adds plan_content to the case's input.yaml so
+    {plan_content} can be resolved in arguments templates.
+    """
+    prior_case = prior_run_dir / "cases" / case_id
+    if not prior_case.exists():
+        return
+
+    plan_content = ""
+    for out_dir in sorted(prior_case.iterdir()):
+        if not out_dir.is_dir():
+            continue
+        # Skip harness metadata dirs
+        if out_dir.name in ("subagents", "_modified"):
+            continue
+        for f in sorted(out_dir.rglob("*")):
+            if not f.is_file() or f.is_symlink():
+                continue
+            rel = f.relative_to(prior_case)
+            dest = case_ws / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+            if not plan_content and f.suffix in (".md", ".txt"):
+                try:
+                    plan_content = f.read_text()
+                except (UnicodeDecodeError, OSError):
+                    pass
+
+    # Append plan_content to input.yaml so {plan_content} resolves
+    if plan_content:
+        input_path = case_ws / "input.yaml"
+        input_data = {}
+        if input_path.exists():
+            with open(input_path) as f:
+                input_data = yaml.safe_load(f) or {}
+        if isinstance(input_data, dict):
+            input_data["plan_content"] = plan_content
+            with open(input_path, "w") as f:
+                yaml.dump(input_data, f, default_flow_style=False,
+                          allow_unicode=True, width=120)
 
 
 def _find_input_file(case_dir):

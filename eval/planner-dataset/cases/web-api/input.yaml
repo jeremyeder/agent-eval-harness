@@ -1,0 +1,17 @@
+prompt: |
+  Build a Python REST API for a bookmark manager using FastAPI. Requirements:
+
+  1. CRUD endpoints for bookmarks (URL, title, description, tags)
+  2. Tag-based filtering and full-text search across titles and descriptions
+  3. Automatic URL metadata extraction (title, description, favicon) on bookmark creation
+  4. SQLite storage with async SQLAlchemy
+  5. Pagination with cursor-based navigation
+  6. Import/export in Netscape bookmark HTML format
+  7. Rate limiting (100 req/min per client)
+  8. Health check endpoint
+  9. OpenAPI docs with examples
+  10. Unit and integration tests
+
+  Include a Dockerfile and docker-compose.yaml for local development.
+difficulty: medium
+domain: web

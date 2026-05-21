@@ -156,6 +156,15 @@ def load_case_record(case_dir, config, run_id=None, runs_dir=None):
             except (json.JSONDecodeError, OSError):
                 pass
 
+    # --- Build metrics (from build_analysis commands) ---
+    build_metrics_path = case_dir / "build_metrics.json"
+    if build_metrics_path.is_file() and not build_metrics_path.is_symlink():
+        try:
+            with open(build_metrics_path) as f:
+                record["build_metrics"] = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
     # --- Logs (if traces config enables them) ---
     # In case mode, stdout/stderr are per-case at case_dir/stdout.log.
     # In batch mode, they're at runs_dir/run_id/stdout.log.
@@ -888,6 +897,17 @@ def cmd_judges(args):
     case_dirs = _get_case_dirs(args.run_id, runs_dir)
     project_root = Path.cwd()
 
+    # When --phase is set, swap config's judges/outputs with the phase's
+    phase_name = getattr(args, "phase", None)
+    variant_name = getattr(args, "variant", None)
+    if phase_name:
+        phase = config.resolve_phase(phase_name, variant_name or "")
+        if phase:
+            if phase.judges:
+                config.judges = phase.judges
+            if phase.outputs:
+                config.outputs = phase.outputs
+
     judges = load_judges(config, project_root)
     print(f"Scoring {len(case_dirs)} cases with {len(judges)} judges: "
           f"{[n for n, *_ in judges]}")
@@ -1027,6 +1047,97 @@ def cmd_regression(args):
         print("REGRESSIONS: 0")
 
 
+def cmd_compare_variants(args):
+    """Compare metrics across multiple variant runs."""
+    runs_dir = _get_runs_dir()
+    run_ids = [r.strip() for r in args.run_ids.split(",") if r.strip()]
+
+    comparison = {"variants": {}, "per_case": {}}
+
+    for run_id in run_ids:
+        run_dir = runs_dir / run_id
+        if not run_dir.exists():
+            print(f"  Warning: run {run_id} not found, skipping", file=sys.stderr)
+            continue
+
+        rr_path = run_dir / "run_result.json"
+        summary_path = run_dir / "summary.yaml"
+        rr = {}
+        summary = {}
+        if rr_path.exists():
+            with open(rr_path) as f:
+                rr = json.load(f)
+        if summary_path.exists():
+            with open(summary_path) as f:
+                summary = yaml.safe_load(f) or {}
+
+        variant_name = run_id.rsplit("-", 1)[-1] if "-" in run_id else run_id
+        variant_data = {
+            "run_id": run_id,
+            "total_cost_usd": rr.get("cost_usd"),
+            "total_duration_s": rr.get("duration_s"),
+            "wall_clock_s": rr.get("wall_clock_s"),
+            "total_tokens": rr.get("token_usage"),
+            "num_turns": rr.get("num_turns"),
+            "num_cases": rr.get("num_cases"),
+            "judges": summary.get("judges", {}),
+        }
+
+        # Collect per-phase metrics if phase subdirs exist
+        phase_dirs = [d for d in run_dir.iterdir()
+                      if d.is_dir() and d.name not in ("cases",)
+                      and (d / "run_result.json").exists()]
+        if phase_dirs:
+            variant_data["phases"] = {}
+            for pd in sorted(phase_dirs):
+                with open(pd / "run_result.json") as f:
+                    phase_rr = json.load(f)
+                variant_data["phases"][pd.name] = {
+                    "cost_usd": phase_rr.get("cost_usd"),
+                    "duration_s": phase_rr.get("duration_s"),
+                    "tokens": phase_rr.get("token_usage"),
+                    "num_turns": phase_rr.get("num_turns"),
+                }
+
+        # Collect per-case build metrics
+        cases_dir = run_dir / "cases"
+        if cases_dir.exists():
+            for case_dir in sorted(d for d in cases_dir.iterdir() if d.is_dir()):
+                case_id = case_dir.name
+                bm_path = case_dir / "build_metrics.json"
+                case_rr_path = case_dir / "run_result.json"
+                case_entry = {}
+                if case_rr_path.exists():
+                    with open(case_rr_path) as f:
+                        crr = json.load(f)
+                    case_entry["cost_usd"] = crr.get("cost_usd")
+                    case_entry["duration_s"] = crr.get("duration_s")
+                    case_entry["tokens"] = crr.get("token_usage")
+                if bm_path.exists():
+                    with open(bm_path) as f:
+                        case_entry["build_metrics"] = json.load(f)
+                if case_entry:
+                    comparison["per_case"].setdefault(case_id, {})[variant_name] = case_entry
+
+        comparison["variants"][variant_name] = variant_data
+
+    # Write comparison summary
+    output_dir = Path(args.output) if args.output else runs_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / "comparison_summary.yaml"
+    with open(summary_path, "w") as f:
+        yaml.dump(comparison, f, default_flow_style=False, allow_unicode=True)
+
+    print(f"COMPARISON: {summary_path}")
+    print(f"  Variants: {list(comparison['variants'].keys())}")
+    for vname, vdata in comparison["variants"].items():
+        cost = vdata.get("total_cost_usd")
+        dur = vdata.get("total_duration_s")
+        cost_str = f"${cost:.2f}" if cost else "?"
+        dur_str = f"{dur:.0f}s" if dur else "?"
+        print(f"  {vname}: {cost_str}, {dur_str}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Scoring CLI for eval runs",
@@ -1038,6 +1149,10 @@ def main():
     jdg_p = subparsers.add_parser("judges", help="Run all judges")
     jdg_p.add_argument("--run-id", required=True)
     jdg_p.add_argument("--config", default="eval.yaml")
+    jdg_p.add_argument("--phase", default=None,
+                        help="Phase name — use phase's judges instead of top-level")
+    jdg_p.add_argument("--variant", default=None,
+                        help="Variant name — apply variant overrides to phase")
 
     # pairwise
     pw_p = subparsers.add_parser("pairwise", help="Pairwise comparison")
@@ -1057,9 +1172,19 @@ def main():
     reg_p.add_argument("--config", default="eval.yaml")
     reg_p.add_argument("--baseline", default=None)
 
+    # compare-variants
+    cv_p = subparsers.add_parser("compare-variants",
+                                  help="Compare metrics across variant runs")
+    cv_p.add_argument("--run-ids", required=True,
+                      help="Comma-separated variant run IDs")
+    cv_p.add_argument("--config", default="eval.yaml")
+    cv_p.add_argument("--output", default=None,
+                      help="Output directory for comparison_summary.yaml")
+
     args = parser.parse_args()
     {"judges": cmd_judges, "pairwise": cmd_pairwise,
-     "regression": cmd_regression}[args.command](args)
+     "regression": cmd_regression,
+     "compare-variants": cmd_compare_variants}[args.command](args)
 
 
 if __name__ == "__main__":

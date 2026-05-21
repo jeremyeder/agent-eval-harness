@@ -1,0 +1,18 @@
+prompt: |
+  Build a Python CLI tool called "retort" that processes and transforms structured
+  data files. Requirements:
+
+  1. Accept YAML, JSON, and CSV input files
+  2. Support transform operations: filter, map, sort, group-by, aggregate
+  3. Chain multiple transforms via a pipeline syntax (retort input.yaml --filter "status=active" --sort "created_at" --output result.json)
+  4. Support output formats: YAML, JSON, CSV, table (terminal)
+  5. Include a "schema" subcommand that infers and displays the data schema
+  6. Include a "validate" subcommand that checks data against a schema file
+  7. Handle streaming for large files (>100MB) without loading all into memory
+  8. Comprehensive error messages with suggestions for common mistakes
+  9. Unit tests for all transform operations
+  10. Type hints throughout, zero lint errors with ruff
+
+  The tool should be installable via pip and have a proper pyproject.toml.
+difficulty: hard
+domain: cli

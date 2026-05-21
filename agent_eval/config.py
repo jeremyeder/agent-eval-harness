@@ -80,6 +80,42 @@ class InputsConfig:
 
 
 @dataclass
+class AnalysisCommand:
+    """Post-execution shell command for build metrics collection."""
+    name: str = ""
+    command: str = ""
+
+
+@dataclass
+class PhaseConfig:
+    """One execution phase in a multi-phase evaluation.
+
+    Phases run sequentially (e.g., planning → building). Each has its own
+    skill, arguments, outputs, judges, and optional build_analysis commands.
+    The first phase receives dataset inputs; subsequent phases receive prior
+    phase outputs via {plan_content} placeholder in arguments.
+    """
+    name: str = ""
+    skill: str = ""
+    arguments: str = ""
+    outputs: list = field(default_factory=list)       # List[OutputConfig]
+    judges: list = field(default_factory=list)         # List[JudgeConfig]
+    build_analysis: list = field(default_factory=list)  # List[AnalysisCommand]
+    runner: Optional["RunnerConfig"] = None            # Per-phase runner overrides
+
+
+@dataclass
+class VariantConfig:
+    """Named configuration that overrides phase settings.
+
+    Each variant (e.g., ce-plan, speckit, plan-mode) produces its own run,
+    scored independently, then compared across variants.
+    """
+    name: str = ""
+    phases: dict = field(default_factory=dict)  # phase_name → override dict
+
+
+@dataclass
 class ExecutionConfig:
     """How the skill is invoked against test cases.
 
@@ -229,6 +265,10 @@ class EvalConfig:
     # Judges (inline checks, LLM, pairwise, external code)
     judges: list = field(default_factory=list)
 
+    # Multi-phase evaluation (e.g., planning → building)
+    phases: list = field(default_factory=list)       # List[PhaseConfig]
+    variants: list = field(default_factory=list)     # List[VariantConfig]
+
     # Regression thresholds
     thresholds: dict = field(default_factory=dict)
 
@@ -362,7 +402,121 @@ class EvalConfig:
         # Thresholds
         config.thresholds = raw.get("thresholds", {})
 
+        # Phases (multi-phase evaluation)
+        for p in raw.get("phases", []):
+            phase_outputs = []
+            for o in p.get("outputs", []):
+                phase_outputs.append(OutputConfig(
+                    path=_validate_relative_path(
+                        o.get("path", ""), f"phases[{p.get('name', '?')}].outputs.path",
+                        reject_root=True),
+                    tool=o.get("tool", ""),
+                    schema=o.get("schema", ""),
+                    batch_pattern=o.get("batch_pattern", ""),
+                    types=o.get("types") or None,
+                ))
+            phase_judges = []
+            for j in p.get("judges", []):
+                phase_judges.append(JudgeConfig(
+                    name=j.get("name", ""),
+                    description=j.get("description", ""),
+                    condition=j.get("if", ""),
+                    check=j.get("check", ""),
+                    prompt=j.get("prompt", ""),
+                    prompt_file=j.get("prompt_file", ""),
+                    context=j.get("context", []),
+                    feedback_type=j.get("feedback_type", ""),
+                    model=j.get("model", ""),
+                    module=j.get("module", ""),
+                    function=j.get("function", ""),
+                ))
+            phase_analysis = []
+            for a in p.get("build_analysis", []):
+                phase_analysis.append(AnalysisCommand(
+                    name=a.get("name", ""),
+                    command=a.get("command", ""),
+                ))
+            phase_runner = None
+            if p.get("runner"):
+                pr = p["runner"]
+                phase_runner = RunnerConfig(
+                    type=pr.get("type", runner.type),
+                    settings=pr.get("settings", {}) or {},
+                    plugin_dirs=pr.get("plugin_dirs", []) or [],
+                    env_strip=pr.get("env_strip", []) or [],
+                    system_prompt=pr.get("system_prompt"),
+                    effort=pr.get("effort"),
+                )
+            config.phases.append(PhaseConfig(
+                name=p.get("name", ""),
+                skill=p.get("skill", ""),
+                arguments=p.get("arguments", ""),
+                outputs=phase_outputs,
+                judges=phase_judges,
+                build_analysis=phase_analysis,
+                runner=phase_runner,
+            ))
+
+        # Variants (named phase overrides for comparison)
+        for v in raw.get("variants", []):
+            config.variants.append(VariantConfig(
+                name=v.get("name", ""),
+                phases=v.get("phases", {}),
+            ))
+
         return config
+
+    def get_phase(self, phase_name: str) -> Optional[PhaseConfig]:
+        """Look up a phase by name."""
+        return next((p for p in self.phases if p.name == phase_name), None)
+
+    def get_variant(self, variant_name: str) -> Optional[VariantConfig]:
+        """Look up a variant by name."""
+        return next((v for v in self.variants if v.name == variant_name), None)
+
+    def resolve_phase(self, phase_name: str,
+                      variant_name: str = "") -> Optional[PhaseConfig]:
+        """Return a phase config with variant overrides applied.
+
+        Creates a new PhaseConfig with fields from the base phase, then
+        overlays any non-empty fields from the variant's phase overrides.
+        """
+        base = self.get_phase(phase_name)
+        if not base:
+            return None
+        if not variant_name:
+            return base
+
+        variant = self.get_variant(variant_name)
+        if not variant or phase_name not in variant.phases:
+            return base
+
+        overrides = variant.phases[phase_name]
+        if not isinstance(overrides, dict):
+            return base
+
+        phase_runner = base.runner
+        if overrides.get("runner"):
+            pr = overrides["runner"]
+            fallback = base.runner or RunnerConfig()
+            phase_runner = RunnerConfig(
+                type=pr.get("type", fallback.type),
+                settings=pr.get("settings") or fallback.settings,
+                plugin_dirs=pr.get("plugin_dirs") or fallback.plugin_dirs,
+                env_strip=pr.get("env_strip") or fallback.env_strip,
+                system_prompt=pr.get("system_prompt", fallback.system_prompt),
+                effort=pr.get("effort", fallback.effort),
+            )
+
+        return PhaseConfig(
+            name=base.name,
+            skill=overrides.get("skill", base.skill),
+            arguments=overrides.get("arguments", base.arguments),
+            outputs=base.outputs,
+            judges=base.judges,
+            build_analysis=base.build_analysis,
+            runner=phase_runner,
+        )
 
     @property
     def project_root(self) -> Path:

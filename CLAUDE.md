@@ -96,6 +96,26 @@ Runs are stored in `$AGENT_EVAL_RUNS_DIR` (default `eval/runs`), configured duri
 
 The `schema` descriptions are documentation for the LLM agents and judges. Scripts operate on file paths from eval.yaml directly — no extraction spec, no hardcoded field names.
 
+### Multi-Phase Evaluation (Planner Comparison)
+
+eval.yaml supports two additional top-level sections for comparing planning approaches:
+
+- `phases` — ordered execution phases (e.g., planning → building). Each phase has its own `skill`, `arguments`, `outputs`, `judges`, optional `build_analysis` commands, and optional `runner` overrides.
+- `variants` — named configurations that override phase settings. Each variant (e.g., ce-plan, speckit, plan-mode) runs through all phases independently, producing separate runs for comparison.
+
+Pipeline scripts accept `--phase`, `--variant`, and `--prior-run` arguments:
+- `workspace.py --phase planning --variant ce-plan` — creates workspaces with phase-appropriate output dirs
+- `execute.py --phase planning --variant ce-plan` — uses phase's skill/arguments with variant overrides
+- `execute.py --phase building --variant ce-plan --prior-run runs/plan-run` — injects planning output as `{plan_content}`
+- `collect.py --phase building` — uses phase's outputs list
+- `score.py judges --phase building` — uses phase's judges list
+- `score.py compare-variants --run-ids id1,id2,id3` — generates `comparison_summary.yaml`
+- `report.py --variants id1 id2 id3` — generates comparison HTML report
+
+Phase `build_analysis` runs shell commands post-execution (e.g., `wc -l`, `ruff check`, `pytest --co`), saving results to `build_metrics.json` per case. These are loaded into the judge outputs dict as `build_metrics`.
+
+See `eval/planner-dataset/eval.yaml` for a working example.
+
 ## Usage
 
 ```

@@ -2218,6 +2218,253 @@ def generate_report(config, summary, run_result, run_dir,
 
 
 # ---------------------------------------------------------------------------
+# Variant comparison report
+# ---------------------------------------------------------------------------
+
+def _render_variant_comparison_table(variants_data):
+    """Render the aggregate comparison table: variants as columns, metrics as rows."""
+    if not variants_data:
+        return ""
+
+    names = list(variants_data.keys())
+    metrics = [
+        ("Total tokens", lambda v: _fmt_tokens(v.get("token_usage"))),
+        ("Cost", lambda v: f"${v['cost_usd']:.2f}" if v.get("cost_usd") else "—"),
+        ("Duration", lambda v: f"{v['duration_s'] / 60:.1f} min" if v.get("duration_s") else "—"),
+        ("Wall clock", lambda v: f"{v['wall_clock_s'] / 60:.1f} min" if v.get("wall_clock_s") else "—"),
+        ("Turns", lambda v: f"{v['num_turns']:,}" if v.get("num_turns") else "—"),
+        ("Cases", lambda v: str(v.get("num_cases", "—"))),
+    ]
+
+    html = '<h2>Cost Comparison</h2>\n<table>\n'
+    html += '<tr><th>Metric</th>'
+    for name in names:
+        html += f'<th>{_esc(name)}</th>'
+    html += '</tr>\n'
+
+    for label, fn in metrics:
+        html += f'<tr><td>{_esc(label)}</td>'
+        for name in names:
+            html += f'<td>{fn(variants_data[name])}</td>'
+        html += '</tr>\n'
+
+    html += '</table>\n'
+    return html
+
+
+def _render_phase_comparison(variants_data):
+    """Render per-phase metrics when phase subdirectories exist."""
+    has_phases = any(v.get("phases") for v in variants_data.values())
+    if not has_phases:
+        return ""
+
+    names = list(variants_data.keys())
+    all_phases = set()
+    for v in variants_data.values():
+        all_phases.update((v.get("phases") or {}).keys())
+
+    html = '<h2>Per-Phase Breakdown</h2>\n'
+    for phase_name in sorted(all_phases):
+        html += f'<h3>{_esc(phase_name.title())}</h3>\n<table>\n'
+        html += '<tr><th>Metric</th>'
+        for name in names:
+            html += f'<th>{_esc(name)}</th>'
+        html += '</tr>\n'
+
+        phase_metrics = [
+            ("Tokens", lambda p: _fmt_tokens(p.get("tokens")) if p else "—"),
+            ("Cost", lambda p: f"${p['cost_usd']:.2f}" if p and p.get("cost_usd") else "—"),
+            ("Duration", lambda p: f"{p['duration_s'] / 60:.1f} min" if p and p.get("duration_s") else "—"),
+            ("Turns", lambda p: f"{p['num_turns']:,}" if p and p.get("num_turns") else "—"),
+        ]
+
+        for label, fn in phase_metrics:
+            html += f'<tr><td>{_esc(label)}</td>'
+            for name in names:
+                phases = variants_data[name].get("phases") or {}
+                html += f'<td>{fn(phases.get(phase_name))}</td>'
+            html += '</tr>\n'
+        html += '</table>\n'
+
+    return html
+
+
+def _render_build_metrics_comparison(variants_data):
+    """Render build analysis metrics comparison across variants."""
+    names = list(variants_data.keys())
+    all_metrics = set()
+    for v in variants_data.values():
+        for case_data in (v.get("per_case") or {}).values():
+            all_metrics.update((case_data.get("build_metrics") or {}).keys())
+
+    if not all_metrics:
+        return ""
+
+    html = '<h2>Build Results</h2>\n<table>\n'
+    html += '<tr><th>Metric</th>'
+    for name in names:
+        html += f'<th>{_esc(name)}</th>'
+    html += '</tr>\n'
+
+    for metric in sorted(all_metrics):
+        html += f'<tr><td>{_esc(metric)}</td>'
+        for name in names:
+            per_case = variants_data[name].get("per_case") or {}
+            values = [
+                (case_data.get("build_metrics") or {}).get(metric, "")
+                for case_data in per_case.values()
+            ]
+            # Show the value if single case, or "N cases" summary
+            if len(values) == 1:
+                html += f'<td>{_esc(str(values[0]))}</td>'
+            elif values:
+                html += f'<td>{_esc(str(values[0]))} ({len(values)} cases)</td>'
+            else:
+                html += '<td>—</td>'
+        html += '</tr>\n'
+
+    html += '</table>\n'
+    return html
+
+
+def _render_judge_comparison(variants_data):
+    """Render judge scores comparison across variants."""
+    names = list(variants_data.keys())
+    all_judges = set()
+    for v in variants_data.values():
+        all_judges.update((v.get("judges") or {}).keys())
+
+    if not all_judges:
+        return ""
+
+    html = '<h2>Judge Scores</h2>\n<table>\n'
+    html += '<tr><th>Judge</th>'
+    for name in names:
+        html += f'<th>{_esc(name)}</th>'
+    html += '</tr>\n'
+
+    for judge in sorted(all_judges):
+        html += f'<tr><td>{_esc(judge)}</td>'
+        for name in names:
+            agg = (variants_data[name].get("judges") or {}).get(judge, {})
+            if not isinstance(agg, dict):
+                html += '<td>—</td>'
+                continue
+            pr = agg.get("pass_rate")
+            mean = agg.get("mean")
+            if pr is not None:
+                cls = "pass" if pr >= 0.8 else "fail" if pr < 0.5 else "warn"
+                html += f'<td><span class="{cls}">{pr:.0%}</span></td>'
+            elif mean is not None:
+                html += f'<td>{mean:.2f}</td>'
+            else:
+                html += '<td>—</td>'
+        html += '</tr>\n'
+
+    html += '</table>\n'
+    return html
+
+
+def _fmt_tokens(usage):
+    if not usage or not isinstance(usage, dict):
+        return "—"
+    total = sum(v for v in usage.values() if isinstance(v, (int, float)))
+    if total >= 1_000_000:
+        return f"{total / 1_000:.0f}K"
+    elif total >= 1_000:
+        return f"{total / 1_000:.0f}K"
+    return str(total)
+
+
+def generate_variant_report(config, variant_run_ids, runs_dir):
+    """Generate a comparison report across variant runs."""
+    global _img_compare_counter
+    _img_compare_counter = 0
+
+    # Load comparison_summary.yaml if it exists, otherwise build from run data
+    variants_data = {}
+    for run_id in variant_run_ids:
+        run_dir = runs_dir / run_id
+        if not run_dir.exists():
+            continue
+
+        rr = _load_json(run_dir / "run_result.json")
+        summary = _load_yaml(run_dir / "summary.yaml")
+        variant_name = run_id.rsplit("-", 1)[-1] if "-" in run_id else run_id
+
+        vdata = {
+            "run_id": run_id,
+            "cost_usd": rr.get("cost_usd"),
+            "duration_s": rr.get("duration_s"),
+            "wall_clock_s": rr.get("wall_clock_s"),
+            "token_usage": rr.get("token_usage"),
+            "num_turns": rr.get("num_turns"),
+            "num_cases": rr.get("num_cases"),
+            "judges": summary.get("judges", {}),
+        }
+
+        # Per-phase data
+        phase_dirs = [d for d in run_dir.iterdir()
+                      if d.is_dir() and d.name != "cases"
+                      and (d / "run_result.json").exists()]
+        if phase_dirs:
+            vdata["phases"] = {}
+            for pd in sorted(phase_dirs):
+                vdata["phases"][pd.name] = _load_json(pd / "run_result.json")
+
+        # Per-case build metrics
+        cases_dir = run_dir / "cases"
+        if cases_dir.exists():
+            vdata["per_case"] = {}
+            for case_dir in sorted(d for d in cases_dir.iterdir() if d.is_dir()):
+                bm = _load_json(case_dir / "build_metrics.json")
+                if bm:
+                    vdata["per_case"][case_dir.name] = {"build_metrics": bm}
+
+        variants_data[variant_name] = vdata
+
+    # Also check for comparison_summary.yaml
+    comp_summary = _load_yaml(runs_dir / "comparison_summary.yaml")
+    if comp_summary.get("per_case"):
+        for case_id, case_variants in comp_summary["per_case"].items():
+            for vname, cdata in case_variants.items():
+                if vname in variants_data:
+                    variants_data[vname].setdefault("per_case", {})[case_id] = cdata
+
+    name = config.get("name", "Planner Comparison")
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(name)} — Comparison</title>
+<script>{THEME_SCRIPT}</script>
+<style>{CSS}</style>
+</head>
+<body>
+<button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+<header class="report-header">
+  <h1>{_esc(name)}</h1>
+  <div class="header-meta">
+    <span class="meta-chip"><span class="meta-label">Type</span>Variant Comparison</span>
+    <span class="meta-chip"><span class="meta-label">Variants</span><code>{_esc(', '.join(variants_data.keys()))}</code></span>
+    <span class="meta-chip"><span class="meta-label">Date</span>{_esc(date)}</span>
+  </div>
+</header>
+"""
+    html += _wrap_section(_render_variant_comparison_table(variants_data))
+    html += _wrap_section(_render_phase_comparison(variants_data))
+    html += _wrap_section(_render_build_metrics_comparison(variants_data))
+    html += _wrap_section(_render_judge_comparison(variants_data))
+
+    html += f"\n<script>{TOGGLE_SCRIPT}</script>\n"
+    html += "</body>\n</html>\n"
+    return html
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -2228,6 +2475,8 @@ def main():
     parser.add_argument("--config", default="eval.yaml")
     parser.add_argument("--baseline", default=None,
                         help="Baseline run ID for comparison")
+    parser.add_argument("--variants", nargs="*", default=None,
+                        help="Variant run IDs for planner comparison report")
     parser.add_argument("--open", action="store_true",
                         help="Open report in browser")
     args = parser.parse_args()
@@ -2247,6 +2496,21 @@ def main():
 
     baseline_summary = _load_yaml(baseline_dir / "summary.yaml") if baseline_dir else None
     baseline_result = _load_json(baseline_dir / "run_result.json") if baseline_dir else None
+
+    # Variant comparison mode
+    if args.variants:
+        html = generate_variant_report(
+            config=config,
+            variant_run_ids=args.variants,
+            runs_dir=runs_dir,
+        )
+        output_path = run_dir / "comparison_report.html"
+        output_path.write_text(html)
+        print(f"COMPARISON REPORT: {output_path}")
+        if args.open:
+            import webbrowser
+            webbrowser.open(f"file://{output_path.resolve()}")
+        return
 
     html = generate_report(
         config=config,
