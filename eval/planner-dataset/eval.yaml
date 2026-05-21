@@ -9,10 +9,23 @@ dataset:
     - difficulty: easy|medium|hard
     - domain: cli|web|data
 
+inputs:
+  tools:
+    - match: AskUserQuestion
+      prompt: >
+        Auto-answer any confirmation or clarification prompts. Always confirm
+        and proceed with the default/recommended option. If asked to choose
+        between options, pick the first/recommended one. If asked to confirm
+        scope, say "yes, proceed." Never block on user input.
+
 phases:
   - name: planning
     skill: ""
     arguments: "{prompt}"
+    runner:
+      system_prompt: >
+        Write the complete plan to output/plan.md in the current working directory.
+        The output/ directory already exists. Do not just print the plan — write it to the file.
     outputs:
       - path: output
         schema: "plan.md — the implementation plan document"

@@ -197,6 +197,25 @@ def _collect_per_case(workspace, output_dir, config):
 
             results.setdefault(case_id, {})[out_path] = len(files)
 
+            # Fallback: if a phase has outputs configured but no files were found,
+        # extract the main assistant text from stdout as the output artifact.
+        if not results.get(case_id):
+            stdout_path = case_dir / "stdout.log"
+            if not stdout_path.exists():
+                run_output = output_dir / "cases" / case_id / "stdout.log"
+                if run_output.exists():
+                    stdout_path = run_output
+            if stdout_path.exists():
+                assistant_text = _extract_assistant_text(stdout_path)
+                if assistant_text and config.outputs:
+                    first_out = config.outputs[0].path or "output"
+                    fallback_dir = output_dir / "cases" / case_id / first_out
+                    fallback_dir.mkdir(parents=True, exist_ok=True)
+                    (fallback_dir / "plan.md").write_text(assistant_text)
+                    results.setdefault(case_id, {})[first_out] = 1
+                    print(f"  {case_id}: extracted from stdout → {first_out}/plan.md",
+                          file=sys.stderr)
+
         # Collect files modified in-place during execution
         modified = _collect_modified_files(case_dir, config)
         if modified:
@@ -218,6 +237,34 @@ def _collect_per_case(workspace, output_dir, config):
 
     if not results:
         print("WARNING: no artifacts collected", file=sys.stderr)
+
+
+def _extract_assistant_text(stdout_path):
+    """Extract top-level assistant text from stream-json stdout.
+
+    Used as a fallback when a skill outputs its plan conversationally
+    rather than writing to a file.
+    """
+    texts = []
+    try:
+        for line in stdout_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if obj.get("type") != "assistant" or obj.get("parent_tool_use_id"):
+                continue
+            for block in (obj.get("message") or {}).get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > 50:
+                        texts.append(text)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return "\n\n".join(texts) if texts else ""
 
 
 def _collect_modified_files(case_dir, config):
