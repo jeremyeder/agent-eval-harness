@@ -57,12 +57,13 @@ def _sweep_root():
 def _bd(args_list, sweep_root):
     """Run a bd command against the sweep's isolated beads database.
 
-    Uses -C to change to the sweep root directory. Because sweep_root
+    Uses cwd= to run from the sweep root directory. Because sweep_root
     is under /tmp (no .beads/ ancestor), bd discovers only the sweep's
     .beads/ — never the project's.
     """
-    cmd = ["bd", "-C", str(sweep_root), "--sandbox"] + args_list
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    cmd = ["bd", "--sandbox"] + args_list
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                            cwd=str(sweep_root))
     return result.stdout.strip()
 
 
@@ -253,8 +254,9 @@ def main():
     sweep_beads = sweep_root / ".beads"
     if not sweep_beads.exists():
         subprocess.run(
-            ["bd", "init", f"--prefix={_SWEEP_PREFIX}", "-C", str(sweep_root)],
+            ["bd", "init", f"--prefix={_SWEEP_PREFIX}"],
             capture_output=True, text=True, timeout=30,
+            cwd=str(sweep_root),
         )
         print(f"Initialized sweep DB at {sweep_root}/")
     else:
@@ -451,7 +453,7 @@ def main():
                     cost = result.get("cost_usd", 0) or 0
                     total_cost += cost
                     duration = result.get("duration_s", 0) or 0
-                    tokens = result.get("tokens", {})
+                    tokens = result.get("tokens") or {}
                     total_tokens = sum(v for v in tokens.values()
                                        if isinstance(v, (int, float)))
 
@@ -486,8 +488,8 @@ def main():
     print(f"\nSweep complete: {completed}/{total_runs} runs, "
           f"${total_cost:.2f} total, {elapsed:.0f}s elapsed")
     print(f"\nSweep DB: {sweep_root}")
-    print(f"Status:  bd -C {sweep_root} stats")
-    print(f"Details: bd -C {sweep_root} list")
+    print(f"Status:  cd {sweep_root} && bd stats")
+    print(f"Details: cd {sweep_root} && bd list")
 
     # Generate comparison report
     print("\nTo generate comparison report:")
