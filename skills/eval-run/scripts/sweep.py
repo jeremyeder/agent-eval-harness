@@ -42,15 +42,24 @@ def _get_runs_dir():
 
 
 _SWEEP_PREFIX = "SWP"
-_SWEEP_DB_DIR = ".beads-sweep"
+
+
+def _sweep_root():
+    """Sweep beads DB lives under /tmp, outside any project tree.
+
+    This prevents beads parent-directory traversal from finding the
+    project's .beads/ — the /tmp path has no .beads/ ancestor.
+    """
+    import tempfile
+    return Path(tempfile.gettempdir()) / "agent-eval-sweep"
 
 
 def _bd(args_list, sweep_root):
     """Run a bd command against the sweep's isolated beads database.
 
-    Uses -C to change to the sweep root directory, ensuring bd discovers
-    only the sweep's .beads-sweep/ database — never the project's .beads/.
-    The sweep DB uses prefix SWP- to make issues visually distinct.
+    Uses -C to change to the sweep root directory. Because sweep_root
+    is under /tmp (no .beads/ ancestor), bd discovers only the sweep's
+    .beads/ — never the project's.
     """
     cmd = ["bd", "-C", str(sweep_root), "--sandbox"] + args_list
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -236,10 +245,10 @@ def main():
     memories = [mv.name for mv in config.memory_variants] or ["none"]
     reps = list(range(1, args.repetitions + 1))
 
-    # Initialize sweep beads database in an isolated directory.
-    # Uses .beads-sweep/ (not .beads/) so bd commands without -C never
-    # discover it, and the project's .beads/ is never confused with it.
-    sweep_root = runs_dir / _SWEEP_DB_DIR
+    # Initialize sweep beads database under /tmp — outside any project
+    # tree, so beads parent-directory traversal never finds the project's
+    # .beads/. This is the only reliable way to isolate beads instances.
+    sweep_root = _sweep_root()
     sweep_root.mkdir(parents=True, exist_ok=True)
     sweep_beads = sweep_root / ".beads"
     if not sweep_beads.exists():
@@ -247,7 +256,9 @@ def main():
             ["bd", "init", f"--prefix={_SWEEP_PREFIX}", "-C", str(sweep_root)],
             capture_output=True, text=True, timeout=30,
         )
-        print(f"Initialized sweep DB at {sweep_root}/", file=sys.stderr)
+        print(f"Initialized sweep DB at {sweep_root}/")
+    else:
+        print(f"Using existing sweep DB at {sweep_root}/")
 
     # Build the run matrix and create beads issues
     plan_issues = {}  # (variant, memory, rep) → issue_id
@@ -474,7 +485,8 @@ def main():
     elapsed = time.monotonic() - start_time
     print(f"\nSweep complete: {completed}/{total_runs} runs, "
           f"${total_cost:.2f} total, {elapsed:.0f}s elapsed")
-    print(f"\nStatus:  bd -C {sweep_root} stats")
+    print(f"\nSweep DB: {sweep_root}")
+    print(f"Status:  bd -C {sweep_root} stats")
     print(f"Details: bd -C {sweep_root} list")
 
     # Generate comparison report
