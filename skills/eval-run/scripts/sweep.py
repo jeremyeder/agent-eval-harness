@@ -59,6 +59,7 @@ def _bd(args_list, sweep_root):
 
 def _bd_create(title, task_type, sweep_root, description="", priority=2):
     """Create a beads issue and return its ID."""
+    import re
     cmd = [
         "create",
         f"--title={title}",
@@ -68,10 +69,8 @@ def _bd_create(title, task_type, sweep_root, description="", priority=2):
     if description:
         cmd.append(f"--description={description}")
     output = _bd(cmd, sweep_root)
-    for line in output.splitlines():
-        if "Created issue:" in line:
-            return line.split("Created issue:")[1].strip().split()[0]
-    return ""
+    m = re.search(r'\b(SWP-\w+)\b', output, re.IGNORECASE)
+    return m.group(1) if m else ""
 
 
 def _bd_close(issue_id, sweep_root, reason=""):
@@ -99,22 +98,16 @@ def _bd_dep_add(issue_id, depends_on_id, sweep_root):
 
 def _bd_ready(sweep_root):
     """Get list of ready (unblocked, open) issue IDs."""
-    output = _bd(["ready", "--format=json"], sweep_root)
+    import re
+    output = _bd(["ready"], sweep_root)
     if not output:
         return []
-    try:
-        issues = json.loads(output)
-        return [i.get("id", "") for i in issues if isinstance(i, dict)]
-    except (json.JSONDecodeError, TypeError):
-        lines = output.splitlines()
-        ids = []
-        for line in lines:
-            parts = line.split()
-            for part in parts:
-                if part.startswith("SWP-") or part.startswith("swp-"):
-                    ids.append(part)
-                    break
-        return ids
+    ids = []
+    for line in output.splitlines():
+        m = re.search(r'\b(SWP-\w+)\b', line, re.IGNORECASE)
+        if m:
+            ids.append(m.group(1))
+    return ids
 
 
 def _bd_is_closed(issue_id, sweep_root):
@@ -280,14 +273,16 @@ def main():
         return
 
     # Check for existing issues (resume support)
-    existing_output = _bd(["list", "--format=json"], sweep_root)
+    existing_output = _bd(["list"], sweep_root)
     existing_titles = set()
-    try:
-        for issue in json.loads(existing_output or "[]"):
-            if isinstance(issue, dict):
-                existing_titles.add(issue.get("title", ""))
-    except (json.JSONDecodeError, TypeError):
-        pass
+    for v in variants:
+        for m in memories:
+            for r in reps:
+                name = _run_name(v, m, r)
+                if f"{name} planning" in existing_output:
+                    existing_titles.add(f"{name} planning")
+                if f"{name} building" in existing_output:
+                    existing_titles.add(f"{name} building")
 
     # Create issues for each run
     for v in variants:
@@ -328,33 +323,33 @@ def main():
 
             # Launch ready tasks (up to max_parallel - active)
             available_slots = args.max_parallel - len(active_futures)
+            active_issue_ids = {v[0] for v in active_futures.values()}
             for issue_id in ready_ids[:available_slots]:
-                if issue_id in active_futures.values():
+                if issue_id in active_issue_ids:
                     continue
 
-                # Determine what this issue represents
+                # Determine what this issue represents by matching against
+                # the known run matrix. Avoids brittle title parsing.
                 issue_output = _bd(["show", issue_id], sweep_root)
-                title = ""
-                for line in issue_output.splitlines():
-                    if "Title:" in line or issue_id in line:
-                        title = line.split("—")[-1].strip() if "—" in line else line
+                matched = None
+                for v in variants:
+                    for m in memories:
+                        for r in reps:
+                            name = _run_name(v, m, r)
+                            for phase_candidate in ("planning", "building"):
+                                needle = f"{name} {phase_candidate}"
+                                if needle in issue_output:
+                                    matched = (v, m, r, phase_candidate, name)
+                                    break
+                            if matched:
+                                break
+                        if matched:
+                            break
+                    if matched:
                         break
-
-                # Parse run parameters from title
-                parts = title.replace(" planning", "").replace(" building", "").strip()
-                phase = "planning" if "planning" in title else "building"
-
-                # Find variant, memory, rep from the run name
-                # Format: planner-{variant}-{memory}-r{n}
-                name_parts = parts.split("-")
-                if len(name_parts) < 4:
+                if not matched:
                     continue
-                variant = name_parts[1]
-                memory = name_parts[2]
-                rep_str = name_parts[3] if len(name_parts) > 3 else "r1"
-                rep = int(rep_str.replace("r", "")) if rep_str.startswith("r") else 1
-
-                run_name = _run_name(variant, memory, rep)
+                variant, memory, rep, phase, run_name = matched
 
                 # For building phase, find the planning run output
                 prior_run = None
