@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-eval-harness"
+version = "0.1.0"
+description = "DoE/ANOVA evaluation harness for AI agents"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+anova = [
+    "scipy>=1.9",
+    "statsmodels>=0.13",
+    "pandas>=1.5",
+    "pingouin>=0.5",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["agent_eval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
