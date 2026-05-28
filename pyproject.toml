@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=82.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,18 +8,18 @@ version = "0.1.0"
 description = "DoE/ANOVA evaluation harness for AI agents"
 requires-python = ">=3.11"
 dependencies = [
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
 anova = [
-    "scipy>=1.9",
-    "statsmodels>=0.13",
-    "pandas>=1.5",
-    "pingouin>=0.5",
+    "scipy>=1.17",
+    "statsmodels>=0.14",
+    "pandas>=3.0",
+    "pingouin>=0.6",
 ]
 dev = [
-    "pytest>=7.0",
+    "pytest>=9.0",
 ]
 
 [tool.setuptools.packages.find]
