@@ -1,0 +1,9 @@
+prompt: |
+  Use the eval-analyze skill to analyze the target skill at
+  eval-optimize/SKILL.md. Follow its referenced eval-run skill at
+  eval-run/SKILL.md, then write the generated eval.yaml at
+  the workspace root. This is an offline case: do not execute either target
+  skill, call external services, or add generic fixture or safety policies.
+source_files:
+  - eval-optimize/SKILL.md
+  - eval-run/SKILL.md

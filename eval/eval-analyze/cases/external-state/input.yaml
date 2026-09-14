@@ -1,0 +1,9 @@
+prompt: |
+  Use the eval-analyze skill to analyze the target skill at
+  target/external-state/fake-jira-skill/SKILL.md. Read that file completely and write
+  the generated eval.yaml at the workspace root. This is an offline case: do not
+  execute the target skill, call Jira, call MCP tools, or invent a Jira server.
+  Preserve the source-backed external-state distinction in the generated dataset
+  schema.
+source_files:
+  - target/external-state/fake-jira-skill/SKILL.md

@@ -1,0 +1,10 @@
+prompt: |
+  Use the eval-analyze skill to analyze the target skill at eval-setup/SKILL.md.
+  Read the target skill and its referenced script at
+  eval-setup/scripts/check_env.py, then write the generated eval.yaml at
+  the workspace root. This is an offline case: do not execute the target skill,
+  inspect unrelated files, call external services, or add external-system fields
+  that are not grounded in those sources.
+source_files:
+  - eval-setup/SKILL.md
+  - eval-setup/scripts/check_env.py
