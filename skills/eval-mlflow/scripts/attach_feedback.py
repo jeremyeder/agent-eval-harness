@@ -30,6 +30,7 @@ import agent_eval._bootstrap  # noqa: F401 — auto-activate venv
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -44,6 +45,24 @@ except ImportError:
 from agent_eval.config import EvalConfig, _validate_path_segment
 from agent_eval.mlflow.experiment import log_feedback, resolve_tracking_uri
 from agent_eval.mlflow.traces import find_run_traces
+
+
+_TRACE_RETRY_TIMEOUT = 30.0
+_TRACE_RETRY_INTERVAL = 0.5
+
+
+def _get_trace_with_retry(trace_id, *, timeout=_TRACE_RETRY_TIMEOUT,
+                          retry_interval=_TRACE_RETRY_INTERVAL):
+    """Return a trace once indexed, or None after a bounded wait."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return mlflow.get_trace(trace_id)
+        except Exception:
+            now = time.monotonic()
+            if now >= deadline:
+                return None
+            time.sleep(min(retry_interval, max(0, deadline - now)))
 
 
 def main():
@@ -79,17 +98,48 @@ def _push_feedback(run_dir, experiment_name, config, args):
     """Push judge and/or human feedback to MLflow traces."""
     # Find traces
     if args.trace_id:
-        trace_ids = [args.trace_id]
+        trace_infos = [{"trace_id": args.trace_id}]
     else:
-        traces = find_run_traces(experiment_name, args.run_id)
-        trace_ids = [t["trace_id"] for t in traces if t.get("trace_id")]
+        trace_infos = find_run_traces(experiment_name, args.run_id)
+    trace_ids = [t["trace_id"] for t in trace_infos if t.get("trace_id")]
+    case_trace_ids = {
+        t["case_id"]: t["trace_id"]
+        for t in trace_infos
+        if t.get("case_id") and t.get("trace_id")
+    }
 
     if not trace_ids:
         print("TRACES: 0 found (tracing may not be enabled)")
         print("FEEDBACK: 0 entries")
         return
 
+    available_trace_ids = []
+    for trace_id in trace_ids:
+        if _get_trace_with_retry(trace_id) is not None:
+            available_trace_ids.append(trace_id)
+        else:
+            print(f"WARNING: trace {trace_id} unavailable; skipping feedback",
+                  file=sys.stderr)
+    trace_ids = available_trace_ids
+    if not trace_ids:
+        print("TRACES: 0 available for feedback")
+        print("FEEDBACK: 0 entries")
+        return
+
     feedback_count = 0
+
+    def target_trace_ids(case_id):
+        """Select only the trace for a case, except for one explicit trace."""
+        if args.trace_id or len(trace_ids) == 1:
+            return trace_ids
+        trace_id = case_trace_ids.get(case_id)
+        if trace_id:
+            return [trace_id]
+        print(
+            f"WARNING: no trace matched case '{case_id}'; skipping feedback",
+            file=sys.stderr,
+        )
+        return []
 
     # Push judge feedback
     if args.source in ("judge", "all"):
@@ -107,7 +157,7 @@ def _push_feedback(run_dir, experiment_name, config, args):
                         continue
                     value = result.get("value")
                     rationale = str(result.get("rationale", ""))
-                    for trace_id in trace_ids:
+                    for trace_id in target_trace_ids(case_id):
                         log_feedback(
                             trace_id=trace_id,
                             name=f"{case_id}/{judge_name}",
@@ -129,7 +179,7 @@ def _push_feedback(run_dir, experiment_name, config, args):
             for case_id, comment in feedback.items():
                 if not comment:
                     continue
-                for trace_id in trace_ids:
+                for trace_id in target_trace_ids(case_id):
                     log_feedback(
                         trace_id=trace_id,
                         name=f"{case_id}/human_review",
@@ -168,7 +218,9 @@ def _pull_feedback(run_dir, experiment_name, args):
             continue
 
         try:
-            trace = mlflow.get_trace(trace_id)
+            trace = _get_trace_with_retry(trace_id)
+            if trace is None:
+                continue
         except Exception:
             continue
 

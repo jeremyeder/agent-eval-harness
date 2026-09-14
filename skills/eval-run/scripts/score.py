@@ -790,6 +790,33 @@ def load_judges(config, project_root=None):
         elif jc.check:
             scorer = _make_inline_check(jc)
             judge_type = "check"
+        elif jc.mlflow_scorer:
+            from agent_eval.mlflow.scorers import (
+                resolve_scorer,
+                score_with_mlflow_scorer,
+            )
+
+            native_scorer = resolve_scorer(jc, config)
+
+            def scorer(outputs=None, _native_scorer=native_scorer,
+                       _score=score_with_mlflow_scorer):
+                record = outputs or {}
+                artifacts = record.get("files", {})
+                if not artifacts:
+                    artifacts = {"conversation": record.get("conversation", "")}
+                value, rationale, metadata = _score(
+                    _native_scorer,
+                    inputs=record.get("inputs", {}),
+                    outputs=artifacts,
+                    expectations=record.get("annotations", {}),
+                    trace=record.get("trace"),
+                    feedback_type=jc.feedback_type,
+                )
+                if metadata.get("error"):
+                    raise RuntimeError(rationale)
+                return value, rationale
+
+            judge_type = "mlflow"
         elif jc.agent:
             # An agent judge ALSO uses prompt/prompt_file/llm_rubric for its
             # instructions, so this must be checked BEFORE the LLM branch: the

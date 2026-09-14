@@ -601,6 +601,7 @@ def validate_config(path="eval.yaml"):
         "name", "description", "builtin", "check", "prompt", "prompt_file",
         "module", "function", "arguments", "context", "model", "if", "llm_rubric",
         "feedback_type", "samples", "score_range", "step", "agent", "examples",
+        "mlflow_scorer",
     }
 
     for j in judges:
@@ -628,11 +629,13 @@ def validate_config(path="eval.yaml"):
             impl_types.append("llm_rubric")
         if j.get("module"):
             impl_types.append("module")
+        if j.get("mlflow_scorer"):
+            impl_types.append("mlflow_scorer")
 
         if len(impl_types) == 0:
             errors.append(
                 f"judges.{name} missing implementation. "
-                f"Must have one of: builtin, check, prompt, prompt_file, llm_rubric, or module+function"
+                f"Must have one of: builtin, check, prompt, prompt_file, llm_rubric, module+function, or mlflow_scorer"
             )
         elif len(impl_types) > 1:
             errors.append(

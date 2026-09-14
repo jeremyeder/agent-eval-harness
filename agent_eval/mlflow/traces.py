@@ -1,9 +1,42 @@
 """MLflow trace search and extraction utilities."""
 
 import sys
+from collections.abc import Mapping
 from typing import Optional
 
 from agent_eval.mlflow.experiment import get_experiment_id
+
+
+def _trace_field(trace, *names, default=None):
+    """Read a trace field from either a DataFrame row or a trace object."""
+    for name in names:
+        if isinstance(trace, Mapping) and name in trace:
+            return trace[name]
+        if hasattr(trace, name):
+            return getattr(trace, name)
+    return default
+
+
+def _trace_rows(traces):
+    """Yield row-like values from MLflow's pandas and list result shapes."""
+    try:
+        import pandas as pd
+    except ImportError:
+        pd = None
+
+    if pd is not None and isinstance(traces, pd.DataFrame):
+        return traces.to_dict(orient="records")
+    return traces
+
+
+def _trace_scalar(value):
+    """Unwrap MLflow enum-like metadata values for stable result dictionaries."""
+    nested_value = getattr(value, "value", value)
+    if nested_value is not value and isinstance(
+        nested_value, (bool, int, float, str)
+    ):
+        return nested_value
+    return value
 
 
 def find_run_traces(experiment_name: str, run_id: str = "",
@@ -36,7 +69,7 @@ def find_run_traces(experiment_name: str, run_id: str = "",
 
     try:
         traces = mlflow.search_traces(
-            experiment_ids=[exp_id],
+            locations=[exp_id],
             max_results=max_results,
         )
     except Exception as e:
@@ -44,13 +77,33 @@ def find_run_traces(experiment_name: str, run_id: str = "",
         return []
 
     results = []
-    for trace in traces:
+    for trace in _trace_rows(traces):
         info = trace.info if hasattr(trace, "info") else trace
+        tags = _trace_field(info, "tags", default={})
+        if run_id and isinstance(tags, Mapping):
+            tagged_run_ids = {
+                tags[name]
+                for name in ("mlflow.runId", "agent_eval_run_id")
+                if name in tags
+            }
+            if tagged_run_ids and run_id not in tagged_run_ids:
+                continue
         trace_data = {
-            "trace_id": getattr(info, "request_id", getattr(info, "trace_id", "")),
-            "timestamp": getattr(info, "timestamp_ms", 0),
-            "status": getattr(info, "status", ""),
+            "trace_id": _trace_field(info, "request_id", "trace_id", default=""),
+            "timestamp": _trace_field(
+                info, "timestamp_ms", "request_time", default=0
+            ),
+            "status": _trace_scalar(
+                _trace_field(info, "status", "state", default="")
+            ),
         }
+        case_id = ""
+        if isinstance(tags, Mapping):
+            case_id = tags.get("case_id") or tags.get("eval_run_id", "")
+            if case_id == run_id:
+                case_id = ""
+        if case_id:
+            trace_data["case_id"] = case_id
         results.append(trace_data)
 
     return results

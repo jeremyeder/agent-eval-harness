@@ -1,9 +1,19 @@
-"""Tests for log_results.py path-safety helpers (harbor job-dir traversal)."""
+"""Tests for log_results.py helpers."""
+
+from types import SimpleNamespace
 
 import pytest
 
 try:
     from log_results import _is_within, _safe_trajectory_path
+    from log_results import (
+        _build_per_case_rows,
+        _flush_trace_exports,
+        _link_traces_to_run,
+        _log_dataset_input,
+        _load_case_input_text,
+        _trace_has_complete_io,
+    )
     _has_mlflow = True
 except ModuleNotFoundError as exc:
     # Skip only when mlflow itself is missing; re-raise unrelated import errors
@@ -95,3 +105,156 @@ class TestIsWithin:
         root = tmp_path / "root"
         root.mkdir()
         assert _is_within(root / "missing.txt", root) is False
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_build_per_case_rows_includes_judge_values_rationales_and_trace_links():
+    rows = _build_per_case_rows(
+        {
+            "case-1": {
+                "grounded": {"value": True, "rationale": "uses the source"},
+                "quality": {"value": 0.75, "rationale": "mostly clear"},
+            }
+        },
+        {"case-1": "trace-1"},
+    )
+
+    assert rows == [
+        {
+            "case_id": "case-1",
+            "judge": "grounded",
+            "value": True,
+            "rationale": "uses the source",
+            "trace_id": "trace-1",
+        },
+        {
+            "case_id": "case-1",
+            "judge": "quality",
+            "value": 0.75,
+            "rationale": "mostly clear",
+            "trace_id": "trace-1",
+        },
+    ]
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_build_per_case_rows_uses_only_same_case_harbor_traces():
+    rows = _build_per_case_rows(
+        {
+            "case-1": {"quality": {"value": 0.5}},
+            "case-2": {"quality": {"value": 1.0}},
+            "case-3": {"quality": {"value": 0.0}},
+        },
+        {"case-2": "direct-case-2"},
+        main_trace_id="main-trace",
+        harbor_step_traces={
+            "case-1": {
+                "second": "case-1-second",
+                "first": "case-1-first",
+            },
+            "case-2": {"first": "case-2-first"},
+        },
+    )
+
+    assert [row["trace_id"] for row in rows] == [
+        "case-1-first",
+        "direct-case-2",
+        None,
+    ]
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_log_dataset_input_passes_native_wrapper_to_mlflow(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        __import__("log_results").mlflow,
+        "log_input",
+        lambda dataset, context, tags=None: calls.append((dataset, context, tags)),
+    )
+
+    dataset = SimpleNamespace(_to_mlflow_entity=lambda: "dataset-entity")
+    _log_dataset_input(dataset, "eval-dataset")
+
+    assert len(calls) == 1
+    logged_dataset, context, tags = calls[0]
+    assert logged_dataset is dataset
+    assert context == "evaluation"
+    assert tags == {"dataset_name": "eval-dataset"}
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_log_dataset_input_passes_dataset_object_when_entity_converter_missing(
+    monkeypatch,
+):
+    calls = []
+    module = __import__("log_results")
+    monkeypatch.setattr(
+        module.mlflow,
+        "log_input",
+        lambda dataset, context, tags=None: calls.append((dataset, context, tags)),
+    )
+    dataset = SimpleNamespace(name="eval-dataset")
+
+    module._log_dataset_input(dataset, "eval-dataset")
+
+    assert calls == [(dataset, "evaluation", {"dataset_name": "eval-dataset"})]
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_link_traces_to_run_writes_mlflow_and_harness_run_tags():
+    calls = []
+    client = SimpleNamespace(
+        link_traces_to_run=lambda **kwargs: calls.append(("link", kwargs)),
+        set_trace_tag=lambda *args: calls.append(("tag", args)),
+    )
+
+    _link_traces_to_run(client, "mlflow-run", "harness-run", ["trace-1"])
+
+    assert calls == [
+        (
+            "link",
+            {"run_id": "mlflow-run", "trace_ids": ["trace-1"]},
+        ),
+        ("tag", ("trace-1", "mlflow.runId", "mlflow-run")),
+        ("tag", ("trace-1", "agent_eval_run_id", "harness-run")),
+    ]
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_flush_trace_exports_uses_public_mlflow_api(monkeypatch):
+    calls = []
+    module = __import__("log_results")
+    monkeypatch.setattr(
+        module.mlflow,
+        "flush_trace_async_logging",
+        lambda: calls.append("flushed"),
+        raising=False,
+    )
+
+    _flush_trace_exports()
+
+    assert calls == ["flushed"]
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_load_case_input_text_prefers_prompt(tmp_path):
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "input.yaml").write_text(
+        "prompt: |\n  Analyze this skill.\ninput: ignored\n"
+    )
+
+    assert _load_case_input_text(case_dir) == "Analyze this skill."
+
+
+@pytest.mark.skipif(not _has_mlflow, reason="mlflow not installed")
+def test_trace_has_complete_io_rejects_empty_preview():
+    complete = SimpleNamespace(
+        info=SimpleNamespace(request_preview="prompt", response_preview="answer")
+    )
+    incomplete = SimpleNamespace(
+        info=SimpleNamespace(request_preview="", response_preview="")
+    )
+
+    assert _trace_has_complete_io(complete) is True
+    assert _trace_has_complete_io(incomplete) is False

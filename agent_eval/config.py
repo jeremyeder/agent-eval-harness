@@ -745,6 +745,7 @@ class JudgeConfig:
     - LLM judge: `prompt`, `prompt_file`, or `llm_rubric` contains evaluation instructions
     - External code: `module` and `function` reference a Python callable
     - Builtin: `builtin` references a registered judge from agent_eval/judges/
+    - MLflow scorer: `mlflow_scorer` references an MLflow scorer by name
 
     LLM judge fields (all compile to same internal prompt before rendering):
 
@@ -805,6 +806,8 @@ class JudgeConfig:
     function: str = ""
     # Builtin judge (resolves via BuiltinJudgeRegistry)
     builtin: str = ""
+    # MLflow scorer (resolves via MLflow's scorer registry)
+    mlflow_scorer: str = ""
     # Arguments passed as **kwargs to Python judges, Jinja var to LLM judges
     arguments: dict = field(default_factory=dict)
     # Multi-step: scope this judge to one execution step's sub-record. Empty =
@@ -1375,6 +1378,20 @@ class EvalConfig:
 
         # Judges
         for j in raw.get("judges", []):
+            mlflow_scorer_present = "mlflow_scorer" in j
+            mlflow_scorer_val = j.get("mlflow_scorer", "")
+            if mlflow_scorer_val is None:
+                mlflow_scorer_val = ""
+            if not isinstance(mlflow_scorer_val, str):
+                raise ValueError(
+                    f"Judge '{j.get('name', '')}': "
+                    "'mlflow_scorer' must be a string"
+                )
+            if mlflow_scorer_present and not mlflow_scorer_val.strip():
+                raise ValueError(
+                    f"Judge '{j.get('name', '')}': "
+                    "'mlflow_scorer' must be non-empty"
+                )
             builtin_val = j.get("builtin", "")
             if builtin_val is None:
                 builtin_val = ""
@@ -1475,6 +1492,7 @@ class EvalConfig:
                     module=j.get("module", ""),
                     function=j.get("function", ""),
                     builtin=builtin_val,
+                    mlflow_scorer=mlflow_scorer_val,
                     arguments=args_val,
                     step=j.get("step", "") or "",
                     samples=int(j.get("samples", 1)),
@@ -1505,6 +1523,17 @@ class EvalConfig:
         from agent_eval.judges import builtin_judge_kind, builtin_judge_names
 
         for jc in config.judges:
+            if jc.mlflow_scorer:
+                conflicting = [
+                    field
+                    for field in ("builtin", "check", "module", "function", "agent")
+                    if getattr(jc, field, "")
+                ]
+                if conflicting:
+                    raise ValueError(
+                        f"Judge '{jc.name}': 'mlflow_scorer' is mutually exclusive "
+                        f"with {', '.join(conflicting)}"
+                    )
             builtin_kind = builtin_judge_kind(jc.builtin) if jc.builtin else None
             if jc.builtin and builtin_kind is None:
                 raise ValueError(

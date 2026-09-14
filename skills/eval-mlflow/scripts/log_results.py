@@ -24,7 +24,6 @@ import yaml
 try:
     import mlflow
     from mlflow import MlflowClient
-    from mlflow.entities.assessment_source import AssessmentSource, AssessmentSourceType
 except ImportError:
     print("MLflow not installed. Install with: pip install 'mlflow[genai]'",
           file=sys.stderr)
@@ -37,6 +36,7 @@ from agent_eval.ci_context import (
 )
 from agent_eval.config import EvalConfig, _validate_path_segment
 from agent_eval.mlflow.experiment import resolve_tracking_uri
+from agent_eval.mlflow.datasets import get_or_create_dataset
 
 
 # ── Trace builder (extracted to agent_eval/mlflow/trace_builder.py) ──
@@ -44,6 +44,62 @@ from agent_eval.mlflow.trace_builder import build_trace, log_trace
 # Same transcript metric extractor the run-level aggregation uses, so per-step
 # trace cost/tokens match the run `cost_usd` metric and the HTML report.
 from agent_eval.harbor.results import _extract_transcript_metrics
+
+
+def _build_per_case_rows(per_case, case_trace_map, main_trace_id=None,
+                         harbor_step_traces=None):
+    """Build the native run table rows while retaining legacy judge fields."""
+    rows = []
+    for case_id, case_results in per_case.items():
+        if not isinstance(case_results, dict):
+            continue
+        trace_id = case_trace_map.get(case_id)
+        if trace_id is None and harbor_step_traces:
+            steps_for_case = harbor_step_traces.get(case_id, {})
+            if steps_for_case:
+                first_step = min(steps_for_case)
+                trace_id = steps_for_case[first_step]
+        if trace_id is None and harbor_step_traces is None:
+            trace_id = main_trace_id
+        for judge_name, result in case_results.items():
+            if not isinstance(result, dict):
+                continue
+            rows.append({
+                "case_id": case_id,
+                "judge": judge_name,
+                "value": result.get("value"),
+                "rationale": str(result.get("rationale", ""))[:500],
+                "trace_id": trace_id,
+            })
+    return rows
+
+
+def _link_traces_to_run(client, mlflow_run_id, harness_run_id, trace_ids):
+    """Link traces and retain both MLflow and harness run identities."""
+    client.link_traces_to_run(run_id=mlflow_run_id, trace_ids=trace_ids)
+    for trace_id in trace_ids:
+        client.set_trace_tag(trace_id, "mlflow.runId", mlflow_run_id)
+        client.set_trace_tag(trace_id, "agent_eval_run_id", harness_run_id)
+
+
+def _log_dataset_input(dataset, dataset_name):
+    """Associate an evaluation dataset with the active native MLflow run."""
+    try:
+        mlflow.log_input(
+            dataset,
+            context="evaluation",
+            tags={"dataset_name": dataset_name},
+        )
+    except Exception as exc:
+        print(f"WARNING: failed to associate evaluation dataset: {exc}",
+              file=sys.stderr)
+
+
+def _flush_trace_exports():
+    """Flush MLflow's trace exporter through its public API when available."""
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if flush is not None:
+        flush()
 
 
 def _detect_regressions(judges, thresholds):
@@ -125,6 +181,34 @@ def _safe_trajectory_path(transcript, job_root):
     if traj.is_file() and not traj.is_symlink() and _is_within(traj, job_root):
         return traj
     return None
+
+
+def _load_case_input_text(case_dir):
+    """Read the human-facing prompt from a case's input.yaml, if present."""
+    input_path = case_dir / "input.yaml"
+    if not input_path.is_file() or input_path.is_symlink():
+        return ""
+    try:
+        data = yaml.safe_load(input_path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return ""
+    if isinstance(data, str):
+        return data.strip()
+    if isinstance(data, dict):
+        for key in ("prompt", "input"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _trace_has_complete_io(trace):
+    """Return whether an existing MLflow trace has usable request/response previews."""
+    info = getattr(trace, "info", trace)
+    request = getattr(info, "request_preview", "")
+    response = getattr(info, "response_preview", "")
+    return bool(isinstance(request, str) and request.strip()
+                and isinstance(response, str) and response.strip())
 
 
 def _harbor_steps(job_dir):
@@ -259,6 +343,12 @@ def main():
     with mlflow.start_run(run_name=args.run_id) as run:
         mlflow_run_id = run.info.run_id
 
+        # Attach the same native evaluation dataset used by sync_dataset.py.
+        dataset_name = config.name or _eval_name(config)
+        dataset = get_or_create_dataset(dataset_name, experiment_name)
+        if dataset is not None:
+            _log_dataset_input(dataset, dataset_name)
+
         # ── Params ───────────────────────────────────────────────
         params = {
             "skill": _resolve_skill(config),
@@ -382,25 +472,6 @@ def main():
 
         # ── Per-case results table ───────────────────────────────
         per_case = summary.get("per_case", {})
-        if per_case:
-            table_rows = []
-            for case_id, case_results in per_case.items():
-                if not isinstance(case_results, dict):
-                    continue
-                for judge_name, result in case_results.items():
-                    if not isinstance(result, dict):
-                        continue
-                    table_rows.append({
-                        "case_id": case_id,
-                        "judge": judge_name,
-                        "value": result.get("value"),
-                        "rationale": str(result.get("rationale", ""))[:500],
-                    })
-            if table_rows:
-                columns = {}
-                for key in table_rows[0]:
-                    columns[key] = [row[key] for row in table_rows]
-                mlflow.log_table(columns, artifact_file="per_case_results.json")
 
     # ── Find existing execution traces ────────────────────────────
     # Execution traces are created during skill execution by the trace
@@ -414,14 +485,15 @@ def main():
 
     # TODO: paginate via page_token for experiments with >500 unlinked traces
     try:
-        all_traces = client.search_traces(experiment_ids=[experiment_id],
+        all_traces = client.search_traces(locations=[experiment_id],
                                           max_results=500)
         for t in all_traces:
             tags = t.info.tags or {}
             eval_id = tags.get("eval_run_id", "")
             existing_run = tags.get("mlflow.runId")
             # Match unlinked traces whose eval_run_id matches a case ID
-            if eval_id and not existing_run:
+            if (eval_id and not existing_run
+                    and _trace_has_complete_io(t)):
                 if eval_id not in case_trace_map:
                     case_trace_map[eval_id] = t.info.trace_id
                 trace_ids.append(t.info.trace_id)
@@ -445,7 +517,8 @@ def main():
                 _skill = _resolve_skill(config)
                 trace_name = f"{_skill} ({case_id})" if _skill else case_id
                 trace_dict = build_trace(case_stdout, case_result, case_id,
-                                         experiment_id, trace_name=trace_name)
+                                         experiment_id, trace_name=trace_name,
+                                         input_text=_load_case_input_text(case_dir))
                 if trace_dict:
                     tid = log_trace(trace_dict)
                     if tid:
@@ -506,96 +579,40 @@ def main():
     # Flush async queue so traces are committed before linking/feedback.
     if trace_ids:
         try:
-            from mlflow.tracing.export.async_export_queue import AsyncExportQueue
-            AsyncExportQueue.get_instance().flush(timeout_sec=30)
+            _flush_trace_exports()
         except Exception as e:
             print(f"WARNING: trace export flush failed: {e}", file=sys.stderr)
 
     if not main_trace_id and case_trace_map:
         main_trace_id = next(iter(case_trace_map.values()))
 
+    table_rows = _build_per_case_rows(
+        per_case,
+        case_trace_map,
+        main_trace_id,
+        harbor_step_traces if exec_mode == "harbor" else None,
+    )
+    if table_rows:
+        columns = {key: [row[key] for row in table_rows]
+                   for key in table_rows[0]}
+        # Trace discovery happens after the main run context closes. Reopen the
+        # same native run so the enriched table remains attached to that run.
+        with mlflow.start_run(run_id=mlflow_run_id):
+            mlflow.log_table(columns, artifact_file="per_case_results.json")
+
     # ── Link traces to run (must happen before feedback) ─────────
     try:
         if trace_ids:
-            client.link_traces_to_run(run_id=mlflow_run_id, trace_ids=trace_ids)
-            for tid in trace_ids:
-                client.set_trace_tag(tid, "mlflow.runId", mlflow_run_id)
+            _link_traces_to_run(client, mlflow_run_id, args.run_id, trace_ids)
             print(f"LINKED: {len(trace_ids)} traces to run {mlflow_run_id}")
     except Exception as e:
         print(f"WARNING: failed to link traces: {e}", file=sys.stderr)
-
-    # ── Attach judge feedback to traces (populates Quality tab) ──
-    feedback_count = 0
-
-    _TRUE_STRS = {"pass", "true", "yes", "y", "1", "ok", "success"}
-    _FALSE_STRS = {"fail", "false", "no", "n", "0", "error", "failure"}
-
-    def _to_feedback_value(v):
-        if isinstance(v, bool):
-            return 1.0 if v else 0.0
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str):
-            s = v.strip().lower()
-            if s in _TRUE_STRS:
-                return 1.0
-            if s in _FALSE_STRS:
-                return 0.0
-            try:
-                return float(s)
-            except ValueError:
-                return None
-        return None
-
-    for case_id, case_results in per_case.items():
-        if not isinstance(case_results, dict):
-            continue
-        steps_for_case = harbor_step_traces.get(case_id)
-        for judge_name, result in case_results.items():
-            if not isinstance(result, dict):
-                continue
-            value = result.get("value")
-            if value is None:
-                continue
-            fb_value = _to_feedback_value(value)
-            if fb_value is None:
-                continue
-            # Route feedback: for harbor per-step traces, a step judge
-            # (create/auto-fix/submit) attaches to its own step trace and any
-            # overall judge to the final step; non-harbor runs use the
-            # per-case trace.
-            if steps_for_case:
-                step_trace_ids = list(steps_for_case.values())
-                trace_id = (steps_for_case.get(judge_name)
-                            or steps_for_case.get("submit")
-                            or (step_trace_ids[-1] if step_trace_ids else None))
-            else:
-                trace_id = case_trace_map.get(case_id, main_trace_id)
-            if not trace_id:
-                continue
-            try:
-                mlflow.log_feedback(
-                    trace_id=trace_id,
-                    name=judge_name,
-                    value=fb_value,
-                    rationale=str(result.get("rationale", ""))[:500],
-                    source=AssessmentSource(
-                        source_type=AssessmentSourceType.CODE,
-                        source_id=f"eval/{judge_name}",
-                    ),
-                )
-                feedback_count += 1
-            except Exception as e:
-                print(f"WARNING: failed to log feedback for {case_id}/{judge_name}: {e}",
-                      file=sys.stderr)
 
     print(f"EXPERIMENT: {experiment_name}")
     print(f"RUN: {mlflow_run_id}")
     print(f"PARAMS: {len(params)}")
     print(f"METRICS: {metric_count}")
     print(f"TABLE: per_case_results ({len(per_case)} cases)")
-    if feedback_count:
-        print(f"FEEDBACK: {feedback_count} assessments attached to traces")
 
 
 if __name__ == "__main__":

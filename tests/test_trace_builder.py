@@ -50,6 +50,56 @@ class TestMakeSpan:
 
 
 class TestBuildTrace:
+    def test_codex_events_populate_root_input_and_visible_output(self, tmp_path):
+        """Codex JSONL becomes a useful MLflow request/response trace."""
+        events = [
+            {
+                "type": "item.completed",
+                "timestamp": "2026-04-14T20:00:01.000Z",
+                "item": {
+                    "id": "item_001",
+                    "type": "agent_message",
+                    "text": "Generated eval.yaml.",
+                },
+            },
+            {
+                "type": "turn.completed",
+                "timestamp": "2026-04-14T20:00:02.000Z",
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            },
+        ]
+        stdout = _write_stream(tmp_path, events)
+
+        trace = build_trace(
+            stdout,
+            _basic_run_result(),
+            run_id="test-run",
+            experiment_id="exp-001",
+            input_text="Analyze this skill and write eval.yaml.",
+        )
+
+        root = next(
+            span for span in trace["data"]["spans"]
+            if span["parent_span_id"] is None
+        )
+        root_inputs = json.loads(root["attributes"]["mlflow.spanInputs"])
+        root_outputs = json.loads(root["attributes"]["mlflow.spanOutputs"])
+
+        assert root_inputs == {"prompt": "Analyze this skill and write eval.yaml."}
+        assert root_outputs["response"] == "Generated eval.yaml."
+        assert trace["info"]["request_preview"] == (
+            "Analyze this skill and write eval.yaml."
+        )
+        assert trace["info"]["response_preview"] == "Generated eval.yaml."
+        user_spans = [
+            span for span in trace["data"]["spans"]
+            if _get_span_type(span) == "CHAIN"
+        ]
+        assert len(user_spans) == 1
+        assert json.loads(
+            user_spans[0]["attributes"]["mlflow.spanOutputs"]
+        )["message"] == "Analyze this skill and write eval.yaml."
+
     def test_returns_dict_with_spans(self, tmp_path):
         """build_trace returns a trace dict with info and non-empty spans."""
         events = [

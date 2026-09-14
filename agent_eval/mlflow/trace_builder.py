@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_eval.events import parse_stream_events
+
 
 # ── Trace builder ────────────────────────────────────────────────────
 
@@ -179,7 +181,7 @@ def _load_trajectory_reasoning(trajectory_path):
 
 def build_trace(stdout_path, run_result, run_id, experiment_id,
                 trace_name="", subagent_dir=None,
-                subagent_model=None, trajectory_path=None):
+                subagent_model=None, trajectory_path=None, input_text=None):
     """Build a hierarchical MLflow Trace from the stream-json stdout log.
 
     Structure:
@@ -193,22 +195,24 @@ def build_trace(stdout_path, run_result, run_id, experiment_id,
 
     Harbor runs often omit user text from stream-json; pass ``trajectory_path``
     (ATIF ``trajectory.json``) to restore user turns and the root prompt.
+    ``input_text`` may be supplied by the harness when the runner receives
+    its prompt out-of-band, as Codex does through stdin.
 
     Returns a dict suitable for Trace.from_dict(), or None.
     """
     if not stdout_path.exists():
         return None
 
+    raw_stdout = stdout_path.read_text()
     events = []
-    with open(stdout_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    for line in raw_stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
     if not events:
         return None
 
@@ -247,6 +251,20 @@ def build_trace(stdout_path, run_result, run_id, experiment_id,
     else:
         user_turns_for_spans = stream_user_turns
 
+    # Codex receives its prompt over stdin and does not echo it as a user
+    # event. The harness therefore supplies the canonical case prompt when it
+    # has one; trajectory/stream-derived prompts remain the fallback for
+    # existing Claude and Harbor callers.
+    if isinstance(input_text, str) and input_text.strip():
+        prompt = input_text.strip()
+        if not traj_user_turns:
+            user_turns_for_spans = [{"message": prompt}]
+
+    # The shared event normalizer understands Codex item.completed events as
+    # well as Claude stream-json. Reuse it for visible output extraction
+    # instead of adding a second provider-specific parser here.
+    normalized_events = parse_stream_events(raw_stdout)
+
     if not prompt:
         for e in events:
             if e.get("type") == "assistant":
@@ -269,6 +287,15 @@ def build_trace(stdout_path, run_result, run_id, experiment_id,
                         final_response = text
                         break
             if final_response:
+                break
+
+    if not final_response:
+        for event in reversed(normalized_events):
+            if (event.get("type") == "assistant"
+                    and not event.get("parent_tool_use_id")
+                    and isinstance(event.get("text"), str)
+                    and event["text"].strip()):
+                final_response = event["text"].strip()
                 break
 
     # ATIF trajectory tool args / richer observations (Harbor).

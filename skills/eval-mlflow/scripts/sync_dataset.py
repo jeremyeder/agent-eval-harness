@@ -135,7 +135,7 @@ def main():
 
 def _extract_record(case_dir, input_mapping, expectation_mapping):
     """Extract inputs and expectations from a case directory using the mapping."""
-    record = {"inputs": {}, "expectations": {}}
+    record = {"case_id": case_dir.name, "inputs": {}, "expectations": {}}
 
     for field_name, source in input_mapping.items():
         value = _extract_field(case_dir, source)

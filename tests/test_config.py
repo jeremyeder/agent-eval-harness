@@ -162,6 +162,67 @@ def test_judge_model_resolution_precedence(tmp_path, monkeypatch):
         _resolve_judge_model(jc, cfg)
 
 
+def test_mlflow_scorer_judge_parses(tmp_path):
+    cfg = EvalConfig.from_yaml(_write(tmp_path, """
+name: t
+execution:
+  skill: s
+judges:
+  - name: mlflow_guidelines
+    mlflow_scorer: Guidelines
+    model: gateway:/jeder-codex-endpoint
+    feedback_type: bool
+    arguments:
+      guidelines: |
+        The generated eval.yaml must stay grounded in the target SKILL.md.
+"""))
+
+    jc = cfg.judges[0]
+    assert jc.mlflow_scorer == "Guidelines"
+    assert jc.model == "gateway:/jeder-codex-endpoint"
+    assert jc.feedback_type == "bool"
+    assert jc.arguments == {
+        "guidelines": "The generated eval.yaml must stay grounded in the target SKILL.md.\n"
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("builtin", "cost_budget"),
+        ("check", "return (True, 'ok')"),
+        ("module", "some.module"),
+        ("function", "judge"),
+        ("agent", "{allowed_tools: [Read]}"),
+    ],
+)
+def test_mlflow_scorer_is_mutually_exclusive_with_other_judge_types(
+    tmp_path, field, value
+):
+    with pytest.raises(ValueError, match=rf"mutually exclusive.*{field}"):
+        EvalConfig.from_yaml(_write(tmp_path, f"""
+name: t
+execution:
+  skill: s
+judges:
+  - name: invalid_mlflow_judge
+    mlflow_scorer: Guidelines
+    {field}: {value}
+"""))
+
+
+def test_empty_mlflow_scorer_name_fails_validation(tmp_path):
+    with pytest.raises(ValueError, match=r"'mlflow_scorer'.*non-empty"):
+        EvalConfig.from_yaml(_write(tmp_path, """
+name: t
+execution:
+  skill: s
+judges:
+  - name: invalid_mlflow_judge
+    mlflow_scorer: ""
+"""))
+
+
 # --- Path resolution tests (T009) ---
 
 def test_config_dir_set_from_yaml(tmp_path):

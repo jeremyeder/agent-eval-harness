@@ -23,6 +23,8 @@ site/
 .cache/
 
 .knowledge/
+# Local planning and SDD artifacts
+.superpowers/sdd/
 docs/superpowers/
 
 # Brainstorm files (local-only design exploration)

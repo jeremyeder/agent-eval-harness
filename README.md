@@ -39,6 +39,7 @@ Same config on your laptop, Harbor containers, or EvalHub.
   (including agentic documentation checks).
 - **Robust scoring.** LLM + code judges, pairwise A/B, thresholds, and HTML reports.
 - **MLflow-native traces.** Opt-in experiments, datasets, and hierarchical GenAI traces.
+- **Opt-in MLflow judges.** Use MLflow's native judge catalog alongside the existing harness judges.
 - **Close the loop.** `/eval-optimize` proposes skill fixes from failures and re-runs.
 
 ## Execution Model
@@ -86,6 +87,9 @@ claude --plugin-dir ./agent-eval-harness
 ```
 
 This makes all eval skills available: `/eval-setup`, `/eval-analyze`, `/eval-dataset`, `/eval-run`, `/eval-review`, `/eval-mlflow`, `/eval-optimize`, `/eval-compare`, `/eval-anova`, and `/eval-check`.
+
+See [MLflow-native evaluation](docs/mlflow-native-evaluation.md) for the
+opt-in scorer integration and its evaluation-plane architecture.
 
 ### 2. Set up environment
 
